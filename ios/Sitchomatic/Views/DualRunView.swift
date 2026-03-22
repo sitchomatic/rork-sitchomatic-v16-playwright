@@ -6,45 +6,50 @@ struct DualRunView: View {
     @State private var settings = AutomationSettings.shared
     @State private var credentials: [LoginCredential] = PersistenceService.shared.loadCredentials()
     @State private var selectedSession: ConcurrentSession?
+    @State private var sessionFilter: SessionVisibilityFilter = .all
 
     var body: some View {
         ScrollView {
             VStack(spacing: 16) {
                 controlPanel
-                if engine.isRunning || engine.state == .completed || engine.state == .failed {
-                    progressSection
-                    sessionList
-                }
+                progressSection
+                sessionSection
                 if !engine.isRunning && engine.state != .completed {
                     configSection
                 }
             }
-            .padding()
+            .padding(.horizontal, 16)
+            .padding(.top, 12)
+            .padding(.bottom, 24)
         }
+        .background(Color(.systemGroupedBackground))
         .navigationTitle("Dual Run")
+        .navigationBarTitleDisplayMode(.large)
         .sheet(item: $selectedSession) { session in
             SessionProofSheet(session: session)
         }
     }
 
     private var controlPanel: some View {
-        VStack(spacing: 12) {
-            HStack {
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 6) {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 8) {
                         Image(systemName: engine.state.iconName)
                             .foregroundStyle(engine.isRunning ? .cyan : .secondary)
-                        Text(engine.state.rawValue.capitalized)
-                            .font(.system(size: 14, weight: .semibold, design: .monospaced))
+                        Text(engine.state.displayName)
+                            .font(.headline)
                     }
-                    Text("\(credentials.filter { $0.isEnabled }.count) credentials ready")
-                        .font(.system(size: 12))
+
+                    Text("\(enabledCredentialCount) enabled credentials • \(settings.maxConcurrentPairs) max pairs")
+                        .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+
                 Spacer()
 
                 if engine.isRunning {
-                    HStack(spacing: 12) {
+                    HStack(spacing: 10) {
                         Button {
                             if engine.state == .paused {
                                 engine.resume()
@@ -53,209 +58,246 @@ struct DualRunView: View {
                             }
                         } label: {
                             Image(systemName: engine.state == .paused ? "play.fill" : "pause.fill")
-                                .font(.title3)
                         }
+                        .buttonStyle(.bordered)
 
-                        Button {
+                        Button(role: .destructive) {
                             engine.stop()
                         } label: {
                             Image(systemName: "stop.fill")
-                                .font(.title3)
-                                .foregroundStyle(.red)
                         }
+                        .buttonStyle(.bordered)
                     }
+                    .tint(.cyan)
                 } else {
                     Button {
                         startDualRun()
                     } label: {
-                        HStack(spacing: 6) {
-                            Image(systemName: "bolt.horizontal.fill")
-                            Text("START DUAL RUN")
-                                .font(.system(size: 13, weight: .bold, design: .monospaced))
-                        }
-                        .foregroundStyle(.black)
-                        .padding(.horizontal, 20)
-                        .padding(.vertical, 10)
-                        .background(.cyan)
-                        .clipShape(.capsule)
+                        Label("Start Dual Run", systemImage: "bolt.horizontal.fill")
+                            .font(.headline)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 10)
                     }
-                    .disabled(credentials.filter { $0.isEnabled }.isEmpty)
+                    .buttonStyle(.borderedProminent)
+                    .tint(.cyan)
+                    .disabled(enabledCredentialCount == 0)
                 }
+            }
+
+            HStack(spacing: 10) {
+                metricPill(title: "Health", value: engine.healthScore.formatted(.percent.precision(.fractionLength(0))), tint: healthColor)
+                metricPill(title: "Wave", value: "\(engine.currentWave)/\(max(engine.totalWaves, 1))", tint: .cyan)
+                metricPill(title: "Runtime", value: engine.elapsedFormatted, tint: .secondary)
             }
 
             if engine.retryableCount > 0 && !engine.isRunning {
                 Button {
                     retryFailed()
                 } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: "arrow.clockwise")
-                        Text("RETRY \(engine.retryableCount) FAILED")
-                            .font(.system(size: 12, weight: .bold, design: .monospaced))
-                    }
-                    .foregroundStyle(.orange)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 8)
-                    .overlay(Capsule().stroke(.orange, lineWidth: 1))
+                    Label("Retry \(engine.retryableCount) Failed", systemImage: "arrow.clockwise")
+                        .font(.subheadline.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 10)
                 }
+                .buttonStyle(.bordered)
+                .tint(.orange)
             }
         }
-        .padding()
-        .background(.ultraThinMaterial)
-        .clipShape(.rect(cornerRadius: 16))
+        .padding(16)
+        .background(.regularMaterial, in: .rect(cornerRadius: 20))
     }
 
     private var progressSection: some View {
-        VStack(spacing: 8) {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("Live Overview")
+                    .font(.headline)
+                Spacer()
+                Text(engine.isRunning ? "Active" : "Ready")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(engine.isRunning ? .cyan : .secondary)
+            }
+
             ProgressView(value: engine.overallProgress)
                 .tint(.cyan)
 
-            HStack {
-                Label("\(engine.succeededCount)", systemImage: "checkmark.circle.fill")
-                    .foregroundStyle(.green)
-                Label("\(engine.failedCount)", systemImage: "xmark.circle.fill")
-                    .foregroundStyle(.red)
-                Label("\(engine.activeCount)", systemImage: "bolt.fill")
-                    .foregroundStyle(.cyan)
-                Spacer()
-                Text("Wave \(engine.currentWave)/\(engine.totalWaves)")
-                    .foregroundStyle(.secondary)
-                Text(engine.elapsedFormatted)
-                    .foregroundStyle(.secondary)
+            HStack(spacing: 12) {
+                summaryTile(title: "Succeeded", value: "\(engine.succeededCount)", tint: .green)
+                summaryTile(title: "Failed", value: "\(engine.failedCount)", tint: .red)
+                summaryTile(title: "Active", value: "\(engine.activeCount)", tint: .cyan)
             }
-            .font(.system(size: 12, design: .monospaced))
 
-            HStack {
-                Text("Health: \(String(format: "%.0f%%", engine.healthScore * 100))")
-                    .foregroundStyle(engine.healthScore > 0.7 ? .green : engine.healthScore > 0.4 ? .orange : .red)
-                Spacer()
-                Text("Concurrency: \(engine.effectiveConcurrency)")
-                    .foregroundStyle(.secondary)
+            HStack(spacing: 10) {
+                summaryTile(title: "Queued", value: "\(engine.queuedCount)", tint: .secondary)
+                summaryTile(title: "Concurrency", value: "\(engine.effectiveConcurrency)", tint: .blue)
+                summaryTile(title: "Speed", value: settings.speedMode.displayName, tint: .orange)
             }
-            .font(.system(size: 11, design: .monospaced))
         }
-        .padding()
-        .background(.ultraThinMaterial)
-        .clipShape(.rect(cornerRadius: 16))
+        .padding(16)
+        .background(.regularMaterial, in: .rect(cornerRadius: 20))
     }
 
-    private var sessionList: some View {
-        VStack(alignment: .leading, spacing: 8) {
+    private var sessionSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Text("Sessions")
-                    .font(.headline)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Session Results")
+                        .font(.headline)
+                    Text("Every result includes its Playwright proof screenshots.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
                 Spacer()
-                Text("\(engine.succeededCount)/\(engine.sessions.count)")
-                    .font(.system(size: 12, design: .monospaced))
+                Text("\(filteredSessions.count) shown")
+                    .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
             }
 
-            ForEach(engine.sessions) { session in
-                Button {
-                    selectedSession = session
-                } label: {
-                    sessionRow(session)
+            HStack(spacing: 8) {
+                ForEach(SessionVisibilityFilter.allCases, id: \.self) { filter in
+                    filterChip(title: filter.title, count: count(for: filter), isSelected: sessionFilter == filter) {
+                        sessionFilter = filter
+                    }
                 }
-                .buttonStyle(.plain)
+            }
+
+            if filteredSessions.isEmpty {
+                ContentUnavailableView(
+                    "No Sessions",
+                    systemImage: "rectangle.stack.badge.play",
+                    description: Text("Start a dual run to see live activity, proof screenshots, and per-site outcomes here.")
+                )
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 20)
+                .background(.regularMaterial, in: .rect(cornerRadius: 20))
+            } else {
+                VStack(spacing: 10) {
+                    ForEach(filteredSessions) { session in
+                        Button {
+                            selectedSession = session
+                        } label: {
+                            sessionRow(session)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
             }
         }
-        .padding()
-        .background(.ultraThinMaterial)
-        .clipShape(.rect(cornerRadius: 16))
     }
 
     private func sessionRow(_ session: ConcurrentSession) -> some View {
-        VStack(spacing: 8) {
-            HStack {
+        VStack(spacing: 10) {
+            HStack(alignment: .top) {
                 Image(systemName: session.phase.iconName)
                     .foregroundStyle(phaseColor(session.phase))
                     .frame(width: 20)
 
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: 4) {
                     Text(session.credential.username)
-                        .font(.system(size: 13, weight: .medium, design: .monospaced))
+                        .font(.subheadline.weight(.semibold))
                         .foregroundStyle(.primary)
                         .lineLimit(1)
-                    HStack(spacing: 6) {
+
+                    HStack(spacing: 8) {
                         Text(session.phase.displayName)
                             .foregroundStyle(phaseColor(session.phase))
+                        Text("Wave \(session.waveIndex + 1)")
+                            .foregroundStyle(.secondary)
                         Text(session.proxyInfo)
                             .foregroundStyle(.tertiary)
                     }
-                    .font(.system(size: 11))
+                    .font(.caption)
                     .lineLimit(1)
                 }
 
                 Spacer()
 
-                if session.phase.isActive {
-                    ProgressView()
-                        .controlSize(.small)
-                }
+                VStack(alignment: .trailing, spacing: 6) {
+                    if session.phase.isActive {
+                        ProgressView(value: session.progress)
+                            .tint(.cyan)
+                            .frame(width: 70)
+                    }
 
-                Text(session.elapsedFormatted)
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(.tertiary)
+                    Text(session.elapsedFormatted)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
             }
 
             if session.joeScreenshot != nil || session.ignitionScreenshot != nil {
-                HStack(spacing: 6) {
+                HStack(spacing: 8) {
                     proofThumb(label: "JOE", data: session.joeScreenshot, outcome: session.dualResult?.joeOutcome)
                     proofThumb(label: "IGN", data: session.ignitionScreenshot, outcome: session.dualResult?.ignitionOutcome)
                 }
             }
 
-            if let result = session.dualResult {
-                HStack(spacing: 8) {
+            HStack(spacing: 8) {
+                if let result = session.dualResult {
                     resultChip(result.joeOutcome, label: "Joe")
                     resultChip(result.ignitionOutcome, label: "Ign")
                     Spacer()
-                    Text(String(format: "%.1fs", result.duration))
-                        .font(.system(size: 10, design: .monospaced))
+                    Text(result.duration.formatted(.number.precision(.fractionLength(1))))
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Text("s")
+                        .font(.caption2)
                         .foregroundStyle(.tertiary)
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 10))
-                        .foregroundStyle(.tertiary)
+                } else if let errorMessage = session.errorMessage {
+                    Text(errorMessage)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        .lineLimit(2)
+                    Spacer()
+                } else {
+                    Text("Tap for detailed proof")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
                 }
+
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.tertiary)
             }
         }
-        .padding(.vertical, 8)
-        .padding(.horizontal, 4)
+        .padding(14)
+        .background(.regularMaterial, in: .rect(cornerRadius: 18))
     }
 
     private func proofThumb(label: String, data: Data?, outcome: DualLoginOutcome?) -> some View {
         Group {
             if let data, let uiImage = UIImage(data: data) {
                 Color(.tertiarySystemFill)
-                    .frame(height: 50)
+                    .frame(height: 58)
                     .overlay {
                         Image(uiImage: uiImage)
                             .resizable()
                             .aspectRatio(contentMode: .fill)
                             .allowsHitTesting(false)
                     }
-                    .clipShape(.rect(cornerRadius: 6))
-                    .overlay(alignment: .bottomLeading) {
-                        HStack(spacing: 2) {
+                    .clipShape(.rect(cornerRadius: 8))
+                    .overlay(alignment: .topLeading) {
+                        HStack(spacing: 4) {
                             Circle()
                                 .fill(outcomeColor(outcome))
-                                .frame(width: 4, height: 4)
+                                .frame(width: 5, height: 5)
                             Text(label)
-                                .font(.system(size: 7, weight: .bold, design: .monospaced))
+                                .font(.caption2.weight(.bold))
                                 .foregroundStyle(.white)
                         }
-                        .padding(.horizontal, 4)
-                        .padding(.vertical, 2)
-                        .background(.black.opacity(0.6))
-                        .clipShape(.rect(cornerRadius: 3))
-                        .padding(3)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 4)
+                        .background(.black.opacity(0.64), in: .capsule)
+                        .padding(6)
                     }
             } else {
-                RoundedRectangle(cornerRadius: 6)
+                RoundedRectangle(cornerRadius: 8)
                     .fill(Color(.tertiarySystemFill))
-                    .frame(height: 50)
+                    .frame(height: 58)
                     .overlay {
                         Text(label)
-                            .font(.system(size: 8, weight: .bold, design: .monospaced))
+                            .font(.caption2.weight(.bold))
                             .foregroundStyle(.quaternary)
                     }
             }
@@ -264,19 +306,19 @@ struct DualRunView: View {
     }
 
     private func resultChip(_ outcome: DualLoginOutcome, label: String) -> some View {
-        HStack(spacing: 3) {
+        HStack(spacing: 5) {
             Circle()
                 .fill(outcomeColor(outcome))
-                .frame(width: 5, height: 5)
+                .frame(width: 6, height: 6)
             Text("\(label): \(outcome.rawValue)")
-                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
         }
     }
 
     private var configSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Label("Configuration", systemImage: "gearshape")
+            Text("Configuration")
                 .font(.headline)
 
             Picker("Speed Mode", selection: $settings.speedMode) {
@@ -299,18 +341,115 @@ struct DualRunView: View {
                         .textInputAutocapitalization(.never)
 
                     Text(primarySelectorSummary(for: site))
-                        .font(.system(size: 11, design: .monospaced))
+                        .font(.caption)
                         .foregroundStyle(.secondary)
                 }
             }
         }
-        .padding()
-        .background(.ultraThinMaterial)
-        .clipShape(.rect(cornerRadius: 16))
+        .padding(16)
+        .background(.regularMaterial, in: .rect(cornerRadius: 20))
         .onChange(of: settings.speedMode) { _, _ in settings.save() }
         .onChange(of: settings.maxConcurrentPairs) { _, _ in settings.save() }
         .onChange(of: settings.joeURL) { _, _ in settings.save() }
         .onChange(of: settings.ignitionURL) { _, _ in settings.save() }
+    }
+
+    private func metricPill(title: String, value: String, tint: Color) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            Text(value)
+                .font(.caption.weight(.bold))
+                .foregroundStyle(tint)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(.secondary.opacity(0.08), in: .capsule)
+    }
+
+    private func summaryTile(title: String, value: String, tint: Color) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Text(value)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(tint)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(12)
+        .background(.secondary.opacity(0.08), in: .rect(cornerRadius: 14))
+    }
+
+    private func filterChip(title: String, count: Int, isSelected: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                Text(title)
+                Text("\(count)")
+                    .foregroundStyle(isSelected ? .cyan : .secondary)
+            }
+            .font(.caption.weight(.semibold))
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(isSelected ? .cyan.opacity(0.14) : .secondary.opacity(0.08), in: .capsule)
+            .overlay {
+                Capsule()
+                    .stroke(isSelected ? .cyan : .secondary.opacity(0.24), lineWidth: 1)
+            }
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(isSelected ? .cyan : .secondary)
+    }
+
+    private var filteredSessions: [ConcurrentSession] {
+        let sessions: [ConcurrentSession]
+        switch sessionFilter {
+        case .all:
+            sessions = engine.sessions
+        case .active:
+            sessions = engine.sessions.filter { $0.phase.isActive || $0.phase == .queued }
+        case .failed:
+            sessions = engine.sessions.filter { $0.phase == .failed }
+        case .succeeded:
+            sessions = engine.sessions.filter { $0.phase == .succeeded }
+        }
+
+        return sessions.sorted { lhs, rhs in
+            if lhs.phase.isActive != rhs.phase.isActive {
+                return lhs.phase.isActive
+            }
+            if lhs.phase == .failed && rhs.phase != .failed {
+                return true
+            }
+            return lhs.index < rhs.index
+        }
+    }
+
+    private func count(for filter: SessionVisibilityFilter) -> Int {
+        switch filter {
+        case .all:
+            engine.sessions.count
+        case .active:
+            engine.sessions.filter { $0.phase.isActive || $0.phase == .queued }.count
+        case .failed:
+            engine.sessions.filter { $0.phase == .failed }.count
+        case .succeeded:
+            engine.sessions.filter { $0.phase == .succeeded }.count
+        }
+    }
+
+    private var enabledCredentialCount: Int {
+        credentials.filter(\.isEnabled).count
+    }
+
+    private var healthColor: Color {
+        if engine.healthScore > 0.7 { return .green }
+        if engine.healthScore > 0.4 { return .orange }
+        return .red
     }
 
     private func startDualRun() {

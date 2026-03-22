@@ -1,74 +1,42 @@
-# Section 3: Engine Hardening, Recovery, Memory Tuning + Main Menu Wallpaper
+# Section 4: UI, Debug, Dual Run Visibility Improvements
 
-## Section 3 of 5 — Concurrent Engine + Recovery/Memory Tuning + Wallpaper
+## Section 4 of 5 — Advanced Navigation + Dashboard + Debug Visibility
 
-### Features
+### Completed
 
-**Main Menu Wallpaper**
-
-- Generate the uploaded Sitchomatic cyberpunk image as an app asset
-- Set it as a full-bleed background on the Main Menu screen behind all cards
-- Add a dark overlay gradient so the menu cards and status text remain readable
-- Remove the plain system background and replace with the immersive wallpaper
-
-**Crash Protection Service — Enhanced**
-
-- Add adaptive memory threshold scaling based on crash history (more crashes → lower thresholds)
-- Add automatic cooldown timer after crashes (prevents rapid re-launch of sessions)
-- Add memory pressure level enum (safe / elevated / critical / emergency) for clearer state
-- Add a method to suggest optimal concurrency based on current memory pressure
-
-**Session Recovery Service — Upgraded**
-
-- Add full wave-level checkpoint saving (which credentials completed, which failed, which are pending)
-- Add ability to resume from the last saved checkpoint after a background kill
-- Add automatic stale checkpoint cleanup (checkpoints older than 1 hour get purged)
-- Track recovery success rate for diagnostics
-
-**Background Task Service — Hardened**
-
-- Add keep-alive ping loop that refreshes the background task before expiration
-- Add graceful degradation: when background time is low, finish current wave then pause
-- Track remaining background time and expose it for the dashboard
-
-**WebView Lifetime Budget Service — Tuned**
-
-- Add dynamic budget adjustment: if memory is high, reduce concurrent limit automatically
-- Add per-wave budget tracking (track creations/destructions per wave for better diagnostics)
-- Add budget reset option when engine completes or is manually stopped
-
-**WebView Crash Recovery Service — Improved**
-
-- Add crash pattern detection: if same page crashes repeatedly, blacklist that credential temporarily
-- Add exponential backoff for recovery attempts
-- Add recovery success/failure tracking
-
-**Concurrent Automation Engine — Major Upgrades**
-
-- Integrate enhanced crash protection: auto-reduce concurrency when memory is elevated
-- Add smart wave scheduling: if previous wave had failures, insert longer cooldown
-- Add credential result tracking: update credential success/fail counts after each run
-- Persist attempt history via PersistenceService after each session completes
-- Add engine health score (composite of memory, crash rate, success rate)
-- Improve emergency state persistence with full session snapshot
-- Add auto-pause when memory reaches critical threshold (resume when safe)
+- [x] Replace the legacy tab configuration with the iOS 18 `Tab` API and typed tab selection
+- [x] Add a typed `AppTab` model for safer navigation state across the main menu
+- [x] Build a richer dashboard hero with quick jumps into Run, Credentials, and Debug
+- [x] Add an overview grid for run state, results, background status, and recovery state
+- [x] Add session visibility filters for all, active, failed, and succeeded sessions
+- [x] Keep proof screenshots visible directly inside dashboard session cards
+- [x] Keep proof screenshots visible directly inside dual run session rows
+- [x] Add typed dashboard destinations for Dual Find and Flow Recorder entry points
+- [x] Upgrade the debug console with diagnostics cards, log search, category filters, and severity filters
+- [x] Add a live error badge to the Debug tab using recent logged errors
+- [x] Promote `DebugLogger` to `@Observable` and add UI-friendly titles/all-cases for filters
+- [x] Preserve native SwiftUI materials, semantic colors, and Apple-style hierarchy
+- [x] Verify the iOS app compiles successfully after the Section 4 changes
 
 ### Design
 
-- Main Menu gets the cyberpunk Sitchomatic wallpaper as a full-screen background image
-- Dark gradient overlay from bottom (80% opacity) fading to top (40% opacity) ensures readability
-- Menu cards use `.ultraThinMaterial` over the wallpaper for a glass-card effect
-- Status header gets a slightly stronger material backdrop for contrast
-- The "SITCHOMATIC v16" title stays white/light for contrast against the dark wallpaper
+- [x] Keep the cyberpunk wallpaper as the immersive dashboard backdrop
+- [x] Use layered material cards instead of flat panels for depth
+- [x] Surface session proof, run health, checkpoint state, and background time at a glance
+- [x] Make the main menu feel closer to an advanced native operations dashboard than a basic tab shell
+- [x] Keep the interaction model simple: tap a session for proof, tap a tool to drill in, tap a tab to move sections
 
 ### Files Changed
 
-- **MainMenuView.swift** — Full wallpaper background with gradient overlay
-- **CrashProtectionService.swift** — Adaptive thresholds, memory levels, cooldown timer
-- **SessionRecoveryService.swift** — Full checkpoint system with resume capability
-- **BackgroundTaskService.swift** — Keep-alive loop, graceful degradation
-- **WebViewLifetimeBudgetService.swift** — Dynamic budget, per-wave tracking
-- **WebViewCrashRecoveryService.swift** — Pattern detection, exponential backoff
-- **ConcurrentAutomationEngine.swift** — Smart scheduling, auto-pause, credential tracking, health score
-- **Generated image asset** — Sitchomatic wallpaper from uploaded image
+- [x] `ios/Sitchomatic/Models/AppTab.swift` — typed tab model for the main app shell
+- [x] `ios/Sitchomatic/Models/SessionVisibilityFilter.swift` — reusable session filtering model
+- [x] `ios/Sitchomatic/Models/DashboardDestination.swift` — typed dashboard navigation destinations
+- [x] `ios/Sitchomatic/MainMenuView.swift` — iOS 18 tab API, typed selection, debug badge, tab feedback
+- [x] `ios/Sitchomatic/Views/DashboardView.swift` — advanced dashboard layout, hero card, overview grid, proof-first session list, quick navigation
+- [x] `ios/Sitchomatic/Views/DualRunView.swift` — richer live overview, filterable sessions, proof visibility, improved run controls
+- [x] `ios/Sitchomatic/Views/DebugContainerView.swift` — searchable diagnostics console with category and severity filters
+- [x] `ios/Sitchomatic/Services/DebugLogger.swift` — observable logging model with case lists and display titles
 
+## Next
+
+- [ ] Section 5 — Recorder / DualFind / PPSR integration polish

@@ -1,11 +1,12 @@
 import Foundation
 import os
 
+@Observable
 @MainActor
 final class DebugLogger {
     static let shared = DebugLogger()
 
-    nonisolated enum LogLevel: Int, Sendable, Comparable {
+    nonisolated enum LogLevel: Int, Sendable, Comparable, CaseIterable {
         case trace = 0
         case debug = 1
         case info = 2
@@ -27,9 +28,20 @@ final class DebugLogger {
             case .critical: "🔴"
             }
         }
+
+        var title: String {
+            switch self {
+            case .trace: "Trace"
+            case .debug: "Debug"
+            case .info: "Info"
+            case .warning: "Warn"
+            case .error: "Error"
+            case .critical: "Critical"
+            }
+        }
     }
 
-    nonisolated enum LogCategory: String, Sendable {
+    nonisolated enum LogCategory: String, Sendable, CaseIterable {
         case automation
         case webView
         case network
@@ -40,9 +52,24 @@ final class DebugLogger {
         case ui
         case ppsr
         case general
+
+        var title: String {
+            switch self {
+            case .automation: "Automation"
+            case .webView: "WebView"
+            case .network: "Network"
+            case .proxy: "Proxy"
+            case .stealth: "Stealth"
+            case .persistence: "Storage"
+            case .crash: "Crash"
+            case .ui: "UI"
+            case .ppsr: "PPSR"
+            case .general: "General"
+            }
+        }
     }
 
-    struct LogEntry: Identifiable, Sendable {
+    nonisolated struct LogEntry: Identifiable, Sendable {
         let id: UUID = UUID()
         let timestamp: Date
         let category: LogCategory
@@ -79,11 +106,16 @@ final class DebugLogger {
         }
 
         switch level {
-        case .trace, .debug: osLog.debug("\(message)")
-        case .info: osLog.info("\(message)")
-        case .warning: osLog.warning("\(message)")
-        case .error: osLog.error("\(message)")
-        case .critical: osLog.critical("\(message)")
+        case .trace, .debug:
+            osLog.debug("\(message)")
+        case .info:
+            osLog.info("\(message)")
+        case .warning:
+            osLog.warning("\(message)")
+        case .error:
+            osLog.error("\(message)")
+        case .critical:
+            osLog.critical("\(message)")
         }
     }
 
@@ -100,7 +132,7 @@ final class DebugLogger {
     }
 
     var recentErrors: [LogEntry] {
-        entries.filter { $0.level >= .error }.suffix(50).reversed()
+        Array(entries.filter { $0.level >= .error }.suffix(50).reversed())
     }
 
     func exportLog() -> String {

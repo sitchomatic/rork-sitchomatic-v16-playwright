@@ -2,50 +2,44 @@ import SwiftUI
 
 struct MainMenuView: View {
     let onLogout: () -> Void
-    @State private var selectedTab: Int = 0
+
+    @State private var selectedTab: AppTab = .dashboard
+    @State private var logger = DebugLogger.shared
 
     var body: some View {
         TabView(selection: $selectedTab) {
-            NavigationStack {
-                DashboardView()
+            Tab("Dashboard", systemImage: "gauge.with.dots.needle.50percent", value: .dashboard) {
+                NavigationStack {
+                    DashboardView(selectedTab: $selectedTab)
+                }
             }
-            .tabItem {
-                Label("Dashboard", systemImage: "gauge.with.dots.needle.50percent")
-            }
-            .tag(0)
 
-            NavigationStack {
-                DualRunView()
+            Tab("Run", systemImage: "bolt.horizontal.fill", value: .run) {
+                NavigationStack {
+                    DualRunView()
+                }
             }
-            .tabItem {
-                Label("Run", systemImage: "bolt.horizontal.fill")
-            }
-            .tag(1)
 
-            NavigationStack {
-                CredentialManagerView()
+            Tab("Credentials", systemImage: "person.2.fill", value: .credentials) {
+                NavigationStack {
+                    CredentialManagerView()
+                }
             }
-            .tabItem {
-                Label("Credentials", systemImage: "person.2.fill")
-            }
-            .tag(2)
 
-            NavigationStack {
-                DebugContainerView()
+            Tab("Debug", systemImage: "ant.fill", value: .debug) {
+                NavigationStack {
+                    DebugContainerView()
+                }
             }
-            .tabItem {
-                Label("Debug", systemImage: "ant.fill")
-            }
-            .tag(3)
+            .badge(logger.recentErrors.isEmpty ? 0 : logger.recentErrors.count)
 
-            NavigationStack {
-                SettingsView(onLogout: onLogout)
+            Tab("Settings", systemImage: "gearshape.fill", value: .settings) {
+                NavigationStack {
+                    SettingsView(onLogout: onLogout)
+                }
             }
-            .tabItem {
-                Label("Settings", systemImage: "gearshape.fill")
-            }
-            .tag(4)
         }
         .tint(.cyan)
+        .sensoryFeedback(.selection, trigger: selectedTab)
     }
 }
