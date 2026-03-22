@@ -50,10 +50,13 @@ final class ConcurrentAutomationEngine {
     private(set) var startTime: Date?
     private(set) var preWarmResult: TunnelPreWarmResult?
     private(set) var retryQueue: [LoginCredential] = []
+    private(set) var lastWaveFailureRate: Double = 0
 
     private(set) var isPauseRequested: Bool = false
+    private(set) var isAutoPaused: Bool = false
     private var runTask: Task<Void, Never>?
     private var preWarmTask: Task<Void, Never>?
+    private var memoryWatchTask: Task<Void, Never>?
     private var preWarmedProxySessions: [String: String] = [:]
 
     private let orchestrator = PlaywrightOrchestrator.shared
@@ -66,6 +69,7 @@ final class ConcurrentAutomationEngine {
     private let lifetimeBudget = WebViewLifetimeBudgetService.shared
     private let pool = WebViewPool.shared
     private let fileStorage = PersistentFileStorageService.shared
+    private let persistence = PersistenceService.shared
     private let logger = DebugLogger.shared
 
     var succeededCount: Int { sessions.filter { $0.phase == .succeeded }.count }
@@ -88,16 +92,55 @@ final class ConcurrentAutomationEngine {
         return String(format: "%d:%02d", elapsed / 60, elapsed % 60)
     }
 
+    var healthScore: Double {
+        let memoryScore: Double = {
+            switch crashProtection.memoryPressureLevel {
+            case .safe: return 1.0
+            case .elevated: return 0.7
+            case .critical: return 0.3
+            case .emergency: return 0.0
+            }
+        }()
+
+        let crashScore: Double = {
+            let count = crashProtection.crashCount
+            if count == 0 { return 1.0 }
+            if count <= 2 { return 0.7 }
+            if count <= 5 { return 0.4 }
+            return 0.1
+        }()
+
+        let successScore: Double = {
+            let total = succeededCount + failedCount
+            guard total > 0 else { return 1.0 }
+            return Double(succeededCount) / Double(total)
+        }()
+
+        let recoveryScore = crashRecovery.recoverySuccessRate
+
+        return (memoryScore * 0.3 + crashScore * 0.2 + successScore * 0.3 + recoveryScore * 0.2)
+    }
+
+    var effectiveConcurrency: Int {
+        let suggested = crashProtection.suggestedConcurrency
+        let configured = settings.maxConcurrentPairs
+        return min(suggested, configured)
+    }
+
     var engineDiagnostics: String {
-        let mem = crashProtection.isMemoryCritical ? "CRITICAL" : crashProtection.isMemorySafeForNewSession ? "OK" : "HIGH"
+        let mem = crashProtection.diagnosticSummary
         let budget = lifetimeBudget.diagnosticSummary
         let poolInfo = pool.diagnosticSummary
+        let bg = backgroundService.diagnosticSummary
         return """
-        State: \(state.displayName) | Wave: \(currentWave)/\(totalWaves)
+        State: \(state.displayName) | Wave: \(currentWave)/\(totalWaves) | Health: \(String(format: "%.0f", healthScore * 100))%
         Sessions: \(succeededCount)ok \(failedCount)fail \(activeCount)active \(queuedCount)queued
-        Memory: \(mem) | \(budget)
+        Effective concurrency: \(effectiveConcurrency) (configured: \(settings.maxConcurrentPairs))
+        \(mem)
+        \(budget)
         Pool: \(poolInfo)
-        Retries queued: \(retryQueue.count)
+        \(bg)
+        Retries queued: \(retryQueue.count) | Last wave fail rate: \(String(format: "%.0f", lastWaveFailureRate * 100))%
         PreWarm: \(preWarmResult.map { "\($0.bridgesReady) ready, \($0.bridgesFailed) failed (\($0.durationMs)ms)" } ?? "none")
         """
     }
@@ -119,7 +162,7 @@ final class ConcurrentAutomationEngine {
                 await networkManager.connect()
             }
 
-            let pairsNeeded = min(credentialCount, settings.maxConcurrentPairs)
+            let pairsNeeded = min(credentialCount, effectiveConcurrency)
             pool.preWarm(count: min(pairsNeeded * 2, 6), stealthEnabled: true)
             log(.phase, "Pre-warmed \(min(pairsNeeded * 2, 6)) WebViews in pool")
 
@@ -165,7 +208,7 @@ final class ConcurrentAutomationEngine {
     ) {
         guard state == .idle || state == .completed || state == .failed || state == .cancelled else { return }
 
-        let concurrency = settings.maxConcurrentPairs
+        let concurrency = effectiveConcurrency
         let enabledCredentials = credentials.filter { $0.isEnabled }
         guard !enabledCredentials.isEmpty else {
             log(.error, "No enabled credentials — aborting")
@@ -178,6 +221,8 @@ final class ConcurrentAutomationEngine {
         retryQueue.removeAll()
         currentWave = 0
         isPauseRequested = false
+        isAutoPaused = false
+        lastWaveFailureRate = 0
         startTime = Date()
 
         totalWaves = (enabledCredentials.count + concurrency - 1) / concurrency
@@ -187,9 +232,10 @@ final class ConcurrentAutomationEngine {
             sessions.append(ConcurrentSession(index: index, waveIndex: waveIndex, credential: cred))
         }
 
-        log(.phase, "Dual run starting — \(enabledCredentials.count) credentials, \(concurrency) concurrent pairs, \(totalWaves) waves")
+        log(.phase, "Dual run starting — \(enabledCredentials.count) credentials, \(concurrency) concurrent pairs, \(totalWaves) waves, health: \(String(format: "%.0f", healthScore * 100))%")
 
         sessionRecovery.saveCheckpoint(credentialIndex: 0, waveIndex: 0, phase: "starting")
+        crashProtection.startMonitoring()
 
         backgroundService.beginBackgroundTask(identifier: "sitchomatic.engine") { [weak self] in
             Task { @MainActor in
@@ -199,6 +245,8 @@ final class ConcurrentAutomationEngine {
             }
         }
 
+        startMemoryWatch()
+
         runTask = Task { @MainActor in
             await self.executeWaves(
                 joeFlow: joeFlow,
@@ -207,7 +255,7 @@ final class ConcurrentAutomationEngine {
         }
     }
 
-    // MARK: - Recorded Script Run (for FlowRecorder playback)
+    // MARK: - Recorded Script Run
 
     func startRecordedRun(config: WaveConfig) {
         guard state == .idle || state == .completed || state == .failed || state == .cancelled else { return }
@@ -216,6 +264,7 @@ final class ConcurrentAutomationEngine {
         engineLog.removeAll()
         currentWave = 0
         isPauseRequested = false
+        isAutoPaused = false
         startTime = Date()
 
         let waveCount = Int(ceil(Double(config.totalSessions) / Double(config.concurrency)))
@@ -269,6 +318,7 @@ final class ConcurrentAutomationEngine {
     func resume() {
         guard state == .paused else { return }
         isPauseRequested = false
+        isAutoPaused = false
         state = .running
         log(.phase, "Engine resumed")
     }
@@ -278,6 +328,7 @@ final class ConcurrentAutomationEngine {
         state = .stopping
         runTask?.cancel()
         preWarmTask?.cancel()
+        memoryWatchTask?.cancel()
 
         for session in sessions where !session.phase.isTerminal {
             session.updatePhase(.cancelled)
@@ -288,6 +339,8 @@ final class ConcurrentAutomationEngine {
         backgroundService.endBackgroundTask(identifier: "sitchomatic.engine")
         backgroundService.endBackgroundTask(identifier: "sitchomatic.engine.recorded")
         sessionRecovery.clearCheckpoint()
+        crashProtection.stopMonitoring()
+        lifetimeBudget.reset()
         log(.result, "Engine stopped — \(succeededCount) succeeded, \(failedCount) failed, \(cancelledCount) cancelled")
     }
 
@@ -301,7 +354,39 @@ final class ConcurrentAutomationEngine {
         currentWave = 0
         totalWaves = 0
         startTime = nil
+        lastWaveFailureRate = 0
+        isAutoPaused = false
+        crashProtection.resetCrashHistory()
+        crashRecovery.reset()
+        lifetimeBudget.reset()
         state = .idle
+    }
+
+    // MARK: - Private: Memory Watch (Auto-Pause)
+
+    private func startMemoryWatch() {
+        memoryWatchTask?.cancel()
+        memoryWatchTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(2))
+                guard !Task.isCancelled, let self else { break }
+
+                if self.crashProtection.isMemoryEmergency && self.state == .running && !self.isAutoPaused {
+                    self.isAutoPaused = true
+                    self.isPauseRequested = true
+                    self.state = .paused
+                    self.log(.error, "AUTO-PAUSE: Memory emergency (\(String(format: "%.0f", self.crashProtection.currentMemoryUsageMB))MB) — pausing engine")
+                    self.pool.handleMemoryPressure()
+                }
+
+                if self.isAutoPaused && self.crashProtection.isMemorySafeForNewSession {
+                    self.isAutoPaused = false
+                    self.isPauseRequested = false
+                    self.state = .running
+                    self.log(.phase, "AUTO-RESUME: Memory recovered — resuming engine")
+                }
+            }
+        }
     }
 
     // MARK: - Private: Dual Wave Execution
@@ -341,17 +426,49 @@ final class ConcurrentAutomationEngine {
             }
             guard !Task.isCancelled else { break }
 
+            if crashProtection.isInCooldown {
+                log(.phase, "Waiting for crash cooldown (\(String(format: "%.0f", crashProtection.cooldownRemainingSeconds))s)...")
+                await crashProtection.waitForCooldown()
+            }
+
             if crashProtection.shouldReduceConcurrency {
                 log(.phase, "Memory pressure detected — inserting cooldown before wave \(waveIdx + 1)")
                 pool.handleMemoryPressure()
                 try? await Task.sleep(for: .seconds(3))
+
+                if !crashProtection.isMemorySafeForNewSession {
+                    let recovered = await crashProtection.waitForMemoryToDrop(timeout: 15)
+                    if !recovered {
+                        log(.error, "Memory did not recover — proceeding with reduced concurrency")
+                    }
+                }
             }
 
+            if backgroundService.isBackgroundTimeLow {
+                log(.phase, "Background time low — pausing after current wave")
+                isPauseRequested = true
+                state = .paused
+                emergencyPersistState()
+                continue
+            }
+
+            lifetimeBudget.beginNewWave()
             currentWave = waveIdx + 1
             let waveSessions = sessions.filter { $0.waveIndex == waveIdx }
-            log(.phase, "Wave \(waveIdx + 1)/\(waveCount) — \(waveSessions.count) paired sessions")
+            log(.phase, "Wave \(waveIdx + 1)/\(waveCount) — \(waveSessions.count) paired sessions (eff. concurrency: \(effectiveConcurrency))")
 
-            sessionRecovery.saveCheckpoint(credentialIndex: waveSessions.first?.index ?? 0, waveIndex: waveIdx, phase: "running")
+            sessionRecovery.saveFullCheckpoint(EngineCheckpoint(
+                waveIndex: waveIdx,
+                credentialIndex: waveSessions.first?.index ?? 0,
+                phase: "running",
+                completedCredentialIDs: sessions.filter { $0.phase == .succeeded }.map { $0.credential.id.uuidString },
+                failedCredentialIDs: sessions.filter { $0.phase == .failed }.map { $0.credential.id.uuidString },
+                pendingCredentialIDs: sessions.filter { !$0.phase.isTerminal }.map { $0.credential.id.uuidString },
+                timestamp: Date(),
+                engineState: state.rawValue,
+                succeededCount: succeededCount,
+                failedCount: failedCount
+            ))
 
             await withTaskGroup(of: Void.self) { group in
                 for session in waveSessions {
@@ -367,7 +484,8 @@ final class ConcurrentAutomationEngine {
 
             let waveSucceeded = waveSessions.filter { $0.phase == .succeeded }.count
             let waveFailed = waveSessions.filter { $0.phase == .failed }.count
-            log(.result, "Wave \(waveIdx + 1) complete — \(waveSucceeded) succeeded, \(waveFailed) failed")
+            lastWaveFailureRate = waveSessions.isEmpty ? 0 : Double(waveFailed) / Double(waveSessions.count)
+            log(.result, "Wave \(waveIdx + 1) complete — \(waveSucceeded) succeeded, \(waveFailed) failed (health: \(String(format: "%.0f", healthScore * 100))%)")
 
             let retryableSessions = waveSessions.filter { session in
                 guard let result = session.dualResult else { return false }
@@ -379,8 +497,14 @@ final class ConcurrentAutomationEngine {
                 log(.phase, "Added \(retryCredentials.count) credentials to retry queue")
             }
 
+            persistWaveResults(waveSessions)
+
             if waveIdx < waveCount - 1 && !Task.isCancelled {
-                let delay = settings.interWaveDelaySeconds
+                var delay = settings.interWaveDelaySeconds
+                if lastWaveFailureRate > 0.5 {
+                    delay *= 2.0
+                    log(.phase, "High failure rate (\(String(format: "%.0f", lastWaveFailureRate * 100))%) — doubling inter-wave delay")
+                }
                 let jitter = Double.random(in: 0...0.5)
                 log(.phase, "Inter-wave delay: \(String(format: "%.1f", delay + jitter))s")
                 try? await Task.sleep(for: .seconds(delay + jitter))
@@ -390,7 +514,9 @@ final class ConcurrentAutomationEngine {
         if !Task.isCancelled {
             state = .completed
             sessionRecovery.clearCheckpoint()
-            log(.result, "Run complete — \(succeededCount)/\(sessions.count) succeeded, \(failedCount) failed, \(retryQueue.count) retryable")
+            crashProtection.stopMonitoring()
+            memoryWatchTask?.cancel()
+            log(.result, "Run complete — \(succeededCount)/\(sessions.count) succeeded, \(failedCount) failed, \(retryQueue.count) retryable, health: \(String(format: "%.0f", healthScore * 100))%")
         }
 
         backgroundService.endBackgroundTask(identifier: "sitchomatic.engine")
@@ -402,6 +528,13 @@ final class ConcurrentAutomationEngine {
         ignitionFlow: @escaping @Sendable @MainActor (PlaywrightPage, LoginCredential, SpeedMode) async throws -> DualLoginOutcome
     ) async {
         session.updatePhase(.launching)
+
+        if crashRecovery.isCredentialBlacklisted(session.credential.id.uuidString) {
+            session.setError("Credential temporarily blacklisted due to repeated crashes")
+            session.updatePhase(.failed)
+            log(.error, "Skipping blacklisted credential: \(session.credential.displayName)")
+            return
+        }
 
         guard lifetimeBudget.recordCreation(), lifetimeBudget.recordCreation() else {
             session.setError("WebView lifetime budget exhausted")
@@ -417,6 +550,12 @@ final class ConcurrentAutomationEngine {
             lifetimeBudget.recordDestruction()
             lifetimeBudget.recordDestruction()
             return
+        }
+
+        let backoff = crashRecovery.backoffDuration(for: session.credential.id.uuidString)
+        if backoff > 0 {
+            log(.phase, "Backoff \(String(format: "%.1f", backoff))s for \(session.credential.displayName)")
+            try? await Task.sleep(for: .seconds(backoff))
         }
 
         var attempt = 0
@@ -451,7 +590,9 @@ final class ConcurrentAutomationEngine {
                 session.updatePhase(.succeeded)
                 lifetimeBudget.recordDestruction()
                 lifetimeBudget.recordDestruction()
+                crashRecovery.recordRecoverySuccess(pageID: session.credential.id.uuidString)
                 session.log(.result, "Dual result: SUCCESS (joe: \(result.joeOutcome.rawValue), ignition: \(result.ignitionOutcome.rawValue), \(String(format: "%.1f", result.duration))s)")
+                updateCredentialResult(session.credential, outcome: result)
                 return
 
             case .permDisabled:
@@ -460,6 +601,7 @@ final class ConcurrentAutomationEngine {
                 lifetimeBudget.recordDestruction()
                 lifetimeBudget.recordDestruction()
                 session.log(.result, "Dual result: PERM DISABLED — no retry")
+                updateCredentialResult(session.credential, outcome: result)
                 return
 
             case .tempDisabled, .networkError, .crashed:
@@ -469,11 +611,13 @@ final class ConcurrentAutomationEngine {
                     lifetimeBudget.recordDestruction()
                     lifetimeBudget.recordDestruction()
                     session.log(.result, "Dual result: \(result.outcome.rawValue) — max retries exhausted")
+                    crashRecovery.recordRecoveryFailure(pageID: session.credential.id.uuidString)
+                    updateCredentialResult(session.credential, outcome: result)
                     return
                 }
 
                 if result.outcome == .crashed {
-                    crashRecovery.recordRecovery(pageID: session.id.uuidString, phase: "paired-session")
+                    crashRecovery.recordRecovery(pageID: session.credential.id.uuidString, phase: "paired-session")
                     crashProtection.recordCrash()
                     pool.reportProcessTermination()
                 }
@@ -487,7 +631,53 @@ final class ConcurrentAutomationEngine {
                 lifetimeBudget.recordDestruction()
                 lifetimeBudget.recordDestruction()
                 session.log(.result, "Dual result: UNSURE — joe: \(result.joeOutcome.rawValue), ignition: \(result.ignitionOutcome.rawValue)")
+                updateCredentialResult(session.credential, outcome: result)
                 return
+            }
+        }
+    }
+
+    // MARK: - Private: Credential Result Tracking
+
+    private func updateCredentialResult(_ credential: LoginCredential, outcome: DualLoginResult) {
+        var credentials = persistence.loadCredentials()
+        guard let idx = credentials.firstIndex(where: { $0.id == credential.id }) else { return }
+
+        credentials[idx].totalAttempts += 1
+        credentials[idx].lastAttemptDate = Date()
+        credentials[idx].lastOutcome = outcome.outcome.rawValue
+
+        if outcome.outcome == .success {
+            credentials[idx].successCount += 1
+        } else {
+            credentials[idx].failCount += 1
+        }
+
+        persistence.saveCredentials(credentials)
+
+        let attempt = LoginAttempt(
+            credentialID: credential.id,
+            outcome: outcome.outcome.rawValue,
+            joeOutcome: outcome.joeOutcome.rawValue,
+            ignitionOutcome: outcome.ignitionOutcome.rawValue,
+            duration: outcome.duration,
+            proxyUsed: outcome.proxyUsed,
+            errorMessage: outcome.errorMessage,
+            speedMode: settings.speedMode.rawValue
+        )
+        var attempts = persistence.loadAttempts()
+        attempts.append(attempt)
+        if attempts.count > 1000 {
+            attempts = Array(attempts.suffix(1000))
+        }
+        persistence.saveAttempts(attempts)
+    }
+
+    private func persistWaveResults(_ waveSessions: [ConcurrentSession]) {
+        for session in waveSessions where session.phase.isTerminal {
+            if let result = session.dualResult {
+                let summary = "\(session.credential.displayName): \(result.outcome.rawValue) (joe: \(result.joeOutcome.rawValue), ign: \(result.ignitionOutcome.rawValue), \(String(format: "%.1f", result.duration))s)"
+                fileStorage.save(text: summary, filename: "results/wave-\(session.waveIndex)/\(session.credential.id.uuidString).txt")
             }
         }
     }
@@ -719,6 +909,19 @@ final class ConcurrentAutomationEngine {
     // MARK: - Private: Emergency State Persistence
 
     private func emergencyPersistState() {
+        sessionRecovery.saveFullCheckpoint(EngineCheckpoint(
+            waveIndex: currentWave - 1,
+            credentialIndex: sessions.first(where: { $0.phase.isActive })?.index ?? 0,
+            phase: "emergency",
+            completedCredentialIDs: sessions.filter { $0.phase == .succeeded }.map { $0.credential.id.uuidString },
+            failedCredentialIDs: sessions.filter { $0.phase == .failed }.map { $0.credential.id.uuidString },
+            pendingCredentialIDs: sessions.filter { !$0.phase.isTerminal }.map { $0.credential.id.uuidString },
+            timestamp: Date(),
+            engineState: state.rawValue,
+            succeededCount: succeededCount,
+            failedCount: failedCount
+        ))
+
         let stateDict: [String: String] = [
             "engineState": state.rawValue,
             "currentWave": "\(currentWave)",
@@ -726,6 +929,8 @@ final class ConcurrentAutomationEngine {
             "succeeded": "\(succeededCount)",
             "failed": "\(failedCount)",
             "active": "\(activeCount)",
+            "healthScore": String(format: "%.2f", healthScore),
+            "memoryMB": String(format: "%.0f", crashProtection.currentMemoryUsageMB),
             "timestamp": ISO8601DateFormatter().string(from: Date())
         ]
         if let data = try? JSONSerialization.data(withJSONObject: stateDict),

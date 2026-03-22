@@ -39,7 +39,23 @@ struct MainMenuView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                Color(.systemGroupedBackground).ignoresSafeArea()
+                Image("MainMenuWallpaper")
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+                    .ignoresSafeArea()
+                    .allowsHitTesting(false)
+
+                LinearGradient(
+                    stops: [
+                        .init(color: .black.opacity(0.35), location: 0),
+                        .init(color: .black.opacity(0.55), location: 0.4),
+                        .init(color: .black.opacity(0.8), location: 1.0)
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .ignoresSafeArea()
+                .allowsHitTesting(false)
 
                 ScrollView {
                     VStack(spacing: 20) {
@@ -57,6 +73,7 @@ struct MainMenuView: View {
             }
             .navigationTitle("Sitchomatic v16")
             .navigationBarTitleDisplayMode(.large)
+            .toolbarColorScheme(.dark, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
@@ -81,14 +98,14 @@ struct MainMenuView: View {
                     .frame(width: 10, height: 10)
                 Text(orchestrator.isReady ? "Session Active" : "Session Inactive")
                     .font(.system(size: 13, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.white.opacity(0.8))
                 Spacer()
                 Text("DUAL MODE")
                     .font(.system(size: 11, weight: .black, design: .monospaced))
                     .foregroundStyle(.cyan)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 3)
-                    .background(.cyan.opacity(0.15))
+                    .background(.cyan.opacity(0.2))
                     .clipShape(.capsule)
             }
 
@@ -111,12 +128,22 @@ struct MainMenuView: View {
                         Text(engine.elapsedFormatted)
                     }
                     .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.white.opacity(0.7))
                 }
+            }
+
+            if engine.healthScore < 0.5 {
+                HStack(spacing: 4) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 10))
+                    Text("Engine health: \(String(format: "%.0f", engine.healthScore * 100))%")
+                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                }
+                .foregroundStyle(.orange)
             }
         }
         .padding()
-        .background(.ultraThinMaterial)
+        .background(.thinMaterial.opacity(0.9))
         .clipShape(.rect(cornerRadius: 16))
         .padding(.horizontal)
     }
@@ -129,9 +156,10 @@ struct MainMenuView: View {
                 Text(value)
                     .font(.system(size: 14, weight: .bold, design: .monospaced))
             }
+            .foregroundStyle(.white)
             Text(label)
                 .font(.system(size: 9))
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(.white.opacity(0.5))
         }
         .frame(maxWidth: .infinity)
     }
@@ -144,7 +172,7 @@ struct MainMenuView: View {
                     .foregroundStyle(.cyan)
                 Text(tab.label)
                     .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(.primary)
+                    .foregroundStyle(.white)
             }
             .frame(maxWidth: .infinity)
             .frame(height: 100)

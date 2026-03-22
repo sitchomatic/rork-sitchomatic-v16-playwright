@@ -1,5 +1,21 @@
 import Foundation
 
+nonisolated enum MemoryPressureLevel: String, Sendable {
+    case safe
+    case elevated
+    case critical
+    case emergency
+
+    var suggestedMaxConcurrency: Int {
+        switch self {
+        case .safe: 12
+        case .elevated: 6
+        case .critical: 3
+        case .emergency: 1
+        }
+    }
+}
+
 @MainActor
 final class CrashProtectionService {
     static let shared = CrashProtectionService()
@@ -8,19 +24,59 @@ final class CrashProtectionService {
     private(set) var currentMemoryUsageMB: Double = 0
     private(set) var peakMemoryUsageMB: Double = 0
     private(set) var crashCount: Int = 0
+    private(set) var lastCrashDate: Date?
+    private(set) var cooldownUntil: Date?
     private var monitorTask: Task<Void, Never>?
 
-    private let memoryCriticalThresholdMB: Double = 800
-    private let memoryEmergencyThresholdMB: Double = 1000
-    private let memorySafeThresholdMB: Double = 500
-    private let memoryHighThresholdMB: Double = 600
+    private var baseMemoryCriticalThresholdMB: Double = 800
+    private var baseMemoryEmergencyThresholdMB: Double = 1000
+    private var baseMemorySafeThresholdMB: Double = 500
+    private var baseMemoryElevatedThresholdMB: Double = 600
+
+    private let thresholdReductionPerCrash: Double = 30
+    private let maxThresholdReduction: Double = 200
+    private let cooldownBaseDurationSeconds: TimeInterval = 5
+    private let cooldownMaxDurationSeconds: TimeInterval = 60
+
+    private let logger = DebugLogger.shared
 
     private init() {}
 
-    var isMemoryCritical: Bool { currentMemoryUsageMB > memoryCriticalThresholdMB }
-    var isMemoryEmergency: Bool { currentMemoryUsageMB > memoryEmergencyThresholdMB }
-    var isMemorySafeForNewSession: Bool { currentMemoryUsageMB < memorySafeThresholdMB }
-    var shouldReduceConcurrency: Bool { currentMemoryUsageMB > memoryHighThresholdMB }
+    private var thresholdReduction: Double {
+        min(Double(crashCount) * thresholdReductionPerCrash, maxThresholdReduction)
+    }
+
+    private var memoryCriticalThresholdMB: Double { baseMemoryCriticalThresholdMB - thresholdReduction }
+    private var memoryEmergencyThresholdMB: Double { baseMemoryEmergencyThresholdMB - thresholdReduction }
+    private var memorySafeThresholdMB: Double { baseMemorySafeThresholdMB - thresholdReduction }
+    private var memoryElevatedThresholdMB: Double { baseMemoryElevatedThresholdMB - thresholdReduction }
+
+    var memoryPressureLevel: MemoryPressureLevel {
+        if currentMemoryUsageMB > memoryEmergencyThresholdMB { return .emergency }
+        if currentMemoryUsageMB > memoryCriticalThresholdMB { return .critical }
+        if currentMemoryUsageMB > memoryElevatedThresholdMB { return .elevated }
+        return .safe
+    }
+
+    var isMemoryCritical: Bool { memoryPressureLevel == .critical || memoryPressureLevel == .emergency }
+    var isMemoryEmergency: Bool { memoryPressureLevel == .emergency }
+    var isMemorySafeForNewSession: Bool { memoryPressureLevel == .safe && !isInCooldown }
+    var shouldReduceConcurrency: Bool { memoryPressureLevel != .safe }
+
+    var isInCooldown: Bool {
+        guard let cooldownUntil else { return false }
+        return Date() < cooldownUntil
+    }
+
+    var cooldownRemainingSeconds: TimeInterval {
+        guard let cooldownUntil else { return 0 }
+        return max(0, cooldownUntil.timeIntervalSinceNow)
+    }
+
+    var suggestedConcurrency: Int {
+        if isInCooldown { return 1 }
+        return memoryPressureLevel.suggestedMaxConcurrency
+    }
 
     func startMonitoring() {
         guard !isMonitoring else { return }
@@ -28,7 +84,7 @@ final class CrashProtectionService {
         monitorTask = Task { [weak self] in
             while !Task.isCancelled {
                 self?.updateMemoryUsage()
-                try? await Task.sleep(for: .seconds(5))
+                try? await Task.sleep(for: .seconds(3))
             }
         }
     }
@@ -43,14 +99,39 @@ final class CrashProtectionService {
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
             updateMemoryUsage()
-            if isMemorySafeForNewSession { return true }
+            if memoryPressureLevel == .safe { return true }
             try? await Task.sleep(for: .milliseconds(500))
         }
-        return isMemorySafeForNewSession
+        return memoryPressureLevel == .safe
+    }
+
+    func waitForCooldown() async {
+        while isInCooldown {
+            try? await Task.sleep(for: .milliseconds(250))
+        }
     }
 
     func recordCrash() {
         crashCount += 1
+        lastCrashDate = Date()
+
+        let cooldownDuration = min(
+            cooldownBaseDurationSeconds * pow(1.5, Double(min(crashCount, 10))),
+            cooldownMaxDurationSeconds
+        )
+        cooldownUntil = Date().addingTimeInterval(cooldownDuration)
+
+        logger.log(
+            "Crash #\(crashCount) recorded — cooldown \(String(format: "%.1f", cooldownDuration))s, thresholds reduced by \(String(format: "%.0f", thresholdReduction))MB",
+            category: .crash,
+            level: .error
+        )
+    }
+
+    func resetCrashHistory() {
+        crashCount = 0
+        lastCrashDate = nil
+        cooldownUntil = nil
     }
 
     private func updateMemoryUsage() {
@@ -68,6 +149,8 @@ final class CrashProtectionService {
     }
 
     var diagnosticSummary: String {
-        "Memory: \(String(format: "%.0f", currentMemoryUsageMB))MB (peak: \(String(format: "%.0f", peakMemoryUsageMB))MB) | Crashes: \(crashCount) | Safe: \(isMemorySafeForNewSession)"
+        let level = memoryPressureLevel.rawValue.uppercased()
+        let cooldown = isInCooldown ? " | Cooldown: \(String(format: "%.0f", cooldownRemainingSeconds))s" : ""
+        return "Memory: \(String(format: "%.0f", currentMemoryUsageMB))MB (peak: \(String(format: "%.0f", peakMemoryUsageMB))MB) | Level: \(level) | Crashes: \(crashCount) | Suggested conc: \(suggestedConcurrency)\(cooldown)"
     }
 }
