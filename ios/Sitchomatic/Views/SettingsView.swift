@@ -6,9 +6,47 @@ struct SettingsView: View {
     @State private var settings = AutomationSettings.shared
     @State private var networkManager = SimpleNetworkManager.shared
     @State private var showClearConfirm: Bool = false
+    @State private var wireGuardAccessKey: String = ""
+    @State private var wireGuardKeyError: String?
 
     var body: some View {
         Form {
+            Section("WireGuard") {
+                SecureField("Single access key", text: $wireGuardAccessKey)
+                    .font(.system(.body, design: .monospaced))
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+
+                HStack {
+                    Text("Status")
+                    Spacer()
+                    Label(hasStoredWireGuardAccessKey ? "Configured" : "Missing", systemImage: hasStoredWireGuardAccessKey ? "lock.shield.fill" : "shield.slash.fill")
+                        .foregroundStyle(hasStoredWireGuardAccessKey ? .green : .secondary)
+                        .labelStyle(.titleAndIcon)
+                }
+
+                Button("Save Securely") {
+                    saveWireGuardAccessKey()
+                }
+                .disabled(trimmedWireGuardAccessKey.isEmpty)
+
+                if hasStoredWireGuardAccessKey {
+                    Button("Clear Stored Key", role: .destructive) {
+                        clearWireGuardAccessKey()
+                    }
+                }
+
+                Text("A single access key is kept in the device Keychain and reused across WireGuard tunnel sessions.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                if let wireGuardKeyError {
+                    Text(wireGuardKeyError)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                }
+            }
+
             Section("Speed Mode") {
                 Picker("Preset", selection: $settings.speedMode) {
                     ForEach(SpeedMode.allCases, id: \.self) { mode in
@@ -85,6 +123,13 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
                 }
 
+                HStack {
+                    Text("Access Key")
+                    Spacer()
+                    Text(hasStoredWireGuardAccessKey ? "Single-Key Ready" : "Not Set")
+                        .foregroundStyle(hasStoredWireGuardAccessKey ? .green : .secondary)
+                }
+
                 if networkManager.connectionStatus == .disconnected {
                     Button("Connect") {
                         Task { await networkManager.connect() }
@@ -127,6 +172,9 @@ struct SettingsView: View {
             }
         }
         .navigationTitle("Settings")
+        .task {
+            loadStoredWireGuardAccessKey()
+        }
         .onChange(of: settings.speedMode) { _, _ in settings.save() }
         .onChange(of: settings.maxConcurrentPairs) { _, _ in settings.save() }
         .onChange(of: settings.autoRetryOnFailure) { _, _ in settings.save() }
@@ -145,6 +193,44 @@ struct SettingsView: View {
             }
         } message: {
             Text("This will delete all credentials, attempts, and stored files.")
+        }
+    }
+
+    private var trimmedWireGuardAccessKey: String {
+        wireGuardAccessKey.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var hasStoredWireGuardAccessKey: Bool {
+        !trimmedWireGuardAccessKey.isEmpty
+    }
+
+    private func loadStoredWireGuardAccessKey() {
+        do {
+            wireGuardAccessKey = try WireGuardAccessKeyStore.load() ?? ""
+            wireGuardKeyError = nil
+        } catch {
+            wireGuardAccessKey = ""
+            wireGuardKeyError = "Unable to read the stored access key"
+        }
+    }
+
+    private func saveWireGuardAccessKey() {
+        do {
+            try WireGuardAccessKeyStore.save(trimmedWireGuardAccessKey)
+            wireGuardAccessKey = trimmedWireGuardAccessKey
+            wireGuardKeyError = nil
+        } catch {
+            wireGuardKeyError = "Unable to save the access key securely"
+        }
+    }
+
+    private func clearWireGuardAccessKey() {
+        do {
+            try WireGuardAccessKeyStore.delete()
+            wireGuardAccessKey = ""
+            wireGuardKeyError = nil
+        } catch {
+            wireGuardKeyError = "Unable to clear the stored access key"
         }
     }
 
