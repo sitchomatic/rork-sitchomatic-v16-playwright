@@ -512,10 +512,8 @@ final class PlaywrightOrchestrator {
             proxyUsed: pair.sharedProxyEndpoint
         )
 
-        if preliminaryResult.outcome != .success && settings.captureScreenshotsOnFailure {
-            joeScreenshot = try? await pair.joePage.screenshot()
-            ignitionScreenshot = try? await pair.ignitionPage.screenshot()
-        }
+        joeScreenshot = try? await pair.joePage.screenshot()
+        ignitionScreenshot = try? await pair.ignitionPage.screenshot()
 
         let joeTrace = pair.joePage.tracingEnabled ? pair.joePage.stopTracing() : []
         let ignitionTrace = pair.ignitionPage.tracingEnabled ? pair.ignitionPage.stopTracing() : []
