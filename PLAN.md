@@ -44,6 +44,38 @@
 - [x] `ios/Sitchomatic/Services/WireGuardAccessKeyStore.swift` — Keychain-backed storage for a single WireGuard access key
 - [x] `ios/Sitchomatic/Assets.xcassets/MainMenuWallpaper.imageset/wallpaper.jpg` — refreshed wallpaper art
 
-## Next
+# Section 5: Recorder, Dual Find, and PPSR Integration Polish
 
-- [ ] Section 5 — Recorder / DualFind / PPSR integration polish
+## Section 5 of 5 — Tooling Completion + Artifact Persistence
+
+### Completed
+
+- [x] Rebuild Dual Find into a selector probe with site presets powered by `AutomationSite` and persisted site URLs
+- [x] Add selector-family presets for username, password, and submit targeting Joe Fortune and Ignition Casino
+- [x] Capture proof screenshots during Dual Find runs and persist JSON + PNG artifacts into tool storage
+- [x] Surface PPSR status directly in Dual Find with storage usage, checkpoint visibility, and saved artifact paths
+- [x] Rebuild Flow Recorder into a script studio with mode selection, quick inserts, undo, copy, save, and preview controls
+- [x] Add recorded preview execution from Flow Recorder into `ConcurrentAutomationEngine` via `WaveConfig`
+- [x] Persist recorder manifests and generated Swift scripts into tool storage for later inspection
+- [x] Promote tool saves and probe events into the `DebugLogger` PPSR category for easier debugging
+- [x] Keep future site expansion simple by driving tool presets from `AutomationSite.allCases`
+- [x] Update project documentation to reflect the full app, architecture, tools, storage, and automation flow
+- [x] Verify the iOS app compiles successfully after the Section 5 changes
+
+### Design
+
+- [x] Keep the tools native and operational instead of web-like utility panes
+- [x] Use material cards, clear hierarchy, and compact monospaced detail where it improves diagnostics
+- [x] Keep proof, metadata, and recovery visibility close to the action that generated them
+- [x] Favor direct manipulation: one tap to insert a selector scaffold, one tap to probe, one tap to preview
+
+### Files Changed
+
+- [x] `ios/Sitchomatic/Views/DualFind/DualFindContainerView.swift` — selector probe presets, proof capture, and PPSR artifact visibility
+- [x] `ios/Sitchomatic/Views/FlowRecorder/FlowRecorderContainerView.swift` — script studio UI, quick inserts, save/copy flows, and recorded preview controls
+- [x] `ios/Sitchomatic/Services/RecordingSession.swift` — Codable recorded actions plus undo support for tool composition
+- [x] `README.md` — full app documentation refresh covering architecture, services, tools, and storage
+
+## Status
+
+- [x] Section 5 — Recorder / DualFind / PPSR integration polish

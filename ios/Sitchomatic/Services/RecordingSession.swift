@@ -52,6 +52,11 @@ final class RecordingSession {
         pickedLocator = nil
     }
 
+    func removeLastAction() {
+        guard !actions.isEmpty else { return }
+        actions.removeLast()
+    }
+
     func addAction(_ action: RecordedAction) {
         guard isRecording, !isPaused else { return }
         if action.kind == .navigation {
@@ -108,7 +113,7 @@ nonisolated enum RecorderMode: String, Sendable, CaseIterable {
     }
 }
 
-nonisolated struct RecordedAction: Identifiable, Sendable {
+nonisolated struct RecordedAction: Identifiable, Sendable, Codable {
     let id: UUID = UUID()
     let kind: ActionKind
     let selector: String?
@@ -182,7 +187,7 @@ nonisolated struct RecordedAction: Identifiable, Sendable {
     }
 }
 
-nonisolated enum ActionKind: String, Sendable {
+nonisolated enum ActionKind: String, Sendable, Codable {
     case navigation, click, fill, check, uncheck, select, pressEnter
     case assertVisible, assertText, assertValue, waitForTimeout
 }
