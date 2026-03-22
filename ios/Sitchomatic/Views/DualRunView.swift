@@ -165,23 +165,30 @@ struct DualRunView: View {
 
             Stepper("Concurrent Pairs: \(settings.maxConcurrentPairs)", value: $settings.maxConcurrentPairs, in: 1...12)
 
-            TextField("Joe URL", text: $settings.joeURL)
-                .font(.system(size: 13, design: .monospaced))
-                .textFieldStyle(.roundedBorder)
-                .autocorrectionDisabled()
-                .textInputAutocapitalization(.never)
+            ForEach(settings.availableSites) { site in
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(site.displayName)
+                        .font(.subheadline.weight(.semibold))
 
-            TextField("Ignition URL", text: $settings.ignitionURL)
-                .font(.system(size: 13, design: .monospaced))
-                .textFieldStyle(.roundedBorder)
-                .autocorrectionDisabled()
-                .textInputAutocapitalization(.never)
+                    TextField(site.defaultLoginURL, text: siteURLBinding(for: site))
+                        .font(.system(size: 13, design: .monospaced))
+                        .textFieldStyle(.roundedBorder)
+                        .autocorrectionDisabled()
+                        .textInputAutocapitalization(.never)
+
+                    Text(primarySelectorSummary(for: site))
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                }
+            }
         }
         .padding()
         .background(.ultraThinMaterial)
         .clipShape(.rect(cornerRadius: 16))
         .onChange(of: settings.speedMode) { _, _ in settings.save() }
         .onChange(of: settings.maxConcurrentPairs) { _, _ in settings.save() }
+        .onChange(of: settings.joeURL) { _, _ in settings.save() }
+        .onChange(of: settings.ignitionURL) { _, _ in settings.save() }
     }
 
     private func startDualRun() {
@@ -191,14 +198,38 @@ struct DualRunView: View {
         engine.startDualRun(
             credentials: credentials,
             joeFlow: { page, credential, speed in
-                try await page.goto(settings.joeURL.isEmpty ? "https://example.com" : settings.joeURL)
-                return .success
+                try await SiteLoginAutomationService.shared.executeLogin(
+                    on: page,
+                    site: .joe,
+                    credential: credential,
+                    speedMode: speed,
+                    overrideURL: settings.loginURL(for: .joe)
+                )
             },
             ignitionFlow: { page, credential, speed in
-                try await page.goto(settings.ignitionURL.isEmpty ? "https://example.com" : settings.ignitionURL)
-                return .success
+                try await SiteLoginAutomationService.shared.executeLogin(
+                    on: page,
+                    site: .ignition,
+                    credential: credential,
+                    speedMode: speed,
+                    overrideURL: settings.loginURL(for: .ignition)
+                )
             }
         )
+    }
+
+    private func siteURLBinding(for site: AutomationSite) -> Binding<String> {
+        Binding(
+            get: { settings.loginURL(for: site) },
+            set: { settings.setLoginURL($0, for: site) }
+        )
+    }
+
+    private func primarySelectorSummary(for site: AutomationSite) -> String {
+        let usernameSelector: String = site.usernameSelectors.first ?? "n/a"
+        let passwordSelector: String = site.passwordSelectors.first ?? "n/a"
+        let submitSelector: String = site.submitSelectors.first ?? "n/a"
+        return "Selectors: \(usernameSelector) • \(passwordSelector) • \(submitSelector)"
     }
 
     private func phaseColor(_ phase: SessionPhase) -> Color {

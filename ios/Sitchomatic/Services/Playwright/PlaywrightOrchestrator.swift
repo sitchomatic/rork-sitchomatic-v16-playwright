@@ -375,7 +375,7 @@ final class PlaywrightOrchestrator {
             stealthEnabled: true,
             viewportSize: defaultViewportSize,
             networkConfig: networkConfig,
-            target: .joe
+            target: .ignition
         )
 
         let joeWebView = await joeWebViewTask

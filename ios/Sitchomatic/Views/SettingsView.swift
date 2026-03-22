@@ -5,7 +5,6 @@ struct SettingsView: View {
 
     @State private var settings = AutomationSettings.shared
     @State private var networkManager = SimpleNetworkManager.shared
-    @State private var socks5Input: String = ""
     @State private var showClearConfirm: Bool = false
 
     var body: some View {
@@ -27,11 +26,9 @@ struct SettingsView: View {
                 }
                 .pickerStyle(.inline)
 
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Typing: \(settings.speedMode.typingDelayMs)ms | Action: \(settings.speedMode.actionDelayMs)ms | Post-Submit: \(settings.speedMode.postSubmitWaitMs)ms")
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                }
+                Text("Typing: \(settings.speedMode.typingDelayMs)ms | Action: \(settings.speedMode.actionDelayMs)ms | Post-Submit: \(settings.speedMode.postSubmitWaitMs)ms")
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(.secondary)
             }
 
             Section("Concurrency") {
@@ -47,15 +44,27 @@ struct SettingsView: View {
                 Toggle("Fingerprint Rotation", isOn: $settings.fingerprintRotation)
             }
 
-            Section("URLs") {
-                TextField("Joe URL", text: $settings.joeURL)
-                    .font(.system(size: 13, design: .monospaced))
-                    .autocorrectionDisabled()
-                    .textInputAutocapitalization(.never)
-                TextField("Ignition URL", text: $settings.ignitionURL)
-                    .font(.system(size: 13, design: .monospaced))
-                    .autocorrectionDisabled()
-                    .textInputAutocapitalization(.never)
+            Section("Site URLs") {
+                ForEach(settings.availableSites) { site in
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(site.displayName)
+                            .font(.subheadline.weight(.semibold))
+
+                        TextField(site.defaultLoginURL, text: siteURLBinding(for: site))
+                            .font(.system(size: 13, design: .monospaced))
+                            .autocorrectionDisabled()
+                            .textInputAutocapitalization(.never)
+
+                        Text(primarySelectorSummary(for: site))
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.vertical, 2)
+                }
+
+                Button("Reset Default URLs") {
+                    settings.resetLoginURLsToDefaults()
+                }
             }
 
             Section("Network") {
@@ -111,7 +120,7 @@ struct SettingsView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Sitchomatic v16 Playwright Edition")
                         .font(.system(size: 13, weight: .bold, design: .monospaced))
-                    Text("Permanent Dual Mode | iOS 26+")
+                    Text("Permanent Dual Mode | Site profiles ready for expansion")
                         .font(.system(size: 11, design: .monospaced))
                         .foregroundStyle(.secondary)
                 }
@@ -126,8 +135,10 @@ struct SettingsView: View {
         .onChange(of: settings.captureScreenshotsOnFailure) { _, _ in settings.save() }
         .onChange(of: settings.stealthEnabled) { _, _ in settings.save() }
         .onChange(of: settings.fingerprintRotation) { _, _ in settings.save() }
+        .onChange(of: settings.joeURL) { _, _ in settings.save() }
+        .onChange(of: settings.ignitionURL) { _, _ in settings.save() }
         .alert("Clear All Data?", isPresented: $showClearConfirm) {
-            Button("Cancel", role: .cancel) { }
+            Button("Cancel", role: .cancel) {}
             Button("Clear", role: .destructive) {
                 PersistenceService.shared.clearAll()
                 PersistentFileStorageService.shared.purgeAll()
@@ -135,5 +146,19 @@ struct SettingsView: View {
         } message: {
             Text("This will delete all credentials, attempts, and stored files.")
         }
+    }
+
+    private func siteURLBinding(for site: AutomationSite) -> Binding<String> {
+        Binding(
+            get: { settings.loginURL(for: site) },
+            set: { settings.setLoginURL($0, for: site) }
+        )
+    }
+
+    private func primarySelectorSummary(for site: AutomationSite) -> String {
+        let usernameSelector: String = site.usernameSelectors.first ?? "n/a"
+        let passwordSelector: String = site.passwordSelectors.first ?? "n/a"
+        let submitSelector: String = site.submitSelectors.first ?? "n/a"
+        return "Selectors: \(usernameSelector) • \(passwordSelector) • \(submitSelector)"
     }
 }
