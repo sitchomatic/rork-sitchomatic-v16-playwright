@@ -61,6 +61,7 @@ final class ConcurrentSession: Identifiable {
     private(set) var proxyInfo: String = "Direct"
     private(set) var logEntries: [SessionLogLine] = []
     private(set) var dualResult: DualLoginResult?
+    private(set) var retryCount: Int = 0
 
     var elapsedTime: TimeInterval {
         guard let start = startTime else { return 0 }
@@ -98,6 +99,7 @@ final class ConcurrentSession: Identifiable {
     func setJoeScreenshot(_ data: Data) { joeScreenshot = data }
     func setIgnitionScreenshot(_ data: Data) { ignitionScreenshot = data }
     func setDualResult(_ result: DualLoginResult) { dualResult = result }
+    func incrementRetry() { retryCount += 1 }
 
     func log(_ category: SessionLogLine.Category, _ message: String) {
         logEntries.append(SessionLogLine(timestamp: Date(), category: category, message: message))
