@@ -113,6 +113,17 @@ final class SimpleNetworkManager {
         return endpoint
     }
 
+    func networkConfiguration(forSessionID sessionID: String) -> ActiveNetworkConfig {
+        if let endpoint = proxyEndpoint(forSessionID: sessionID) {
+            return .socks5(host: endpoint.host, port: endpoint.port)
+        }
+        return currentNetworkConfig
+    }
+
+    func clearProxyEndpoint(forSessionID sessionID: String) {
+        proxyEndpoints.removeValue(forKey: sessionID)
+    }
+
     func configureSOCKS5Proxies(_ proxies: [(host: String, port: Int)]) {
         socks5Proxies = proxies
         logger.log("Configured \(proxies.count) SOCKS5 proxies", category: .network, level: .info)

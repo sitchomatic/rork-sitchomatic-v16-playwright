@@ -66,7 +66,6 @@ nonisolated enum PlaywrightError: Error, LocalizedError, Sendable {
 
 @MainActor
 final class PlaywrightPage: Identifiable {
-
     let id: UUID
     let webView: WKWebView
     let defaultTimeout: TimeInterval
@@ -76,7 +75,10 @@ final class PlaywrightPage: Identifiable {
     private var networkIdleInjected: Bool = false
     private let navigationDelegate: PageNavigationDelegate
     private weak var orchestrator: PlaywrightOrchestrator?
-    private let autoWaitStabilityDelay: TimeInterval = 0.15
+
+    private var speedMode: SpeedMode {
+        orchestrator?.currentSpeedMode ?? .balanced
+    }
 
     init(webView: WKWebView, id: UUID, defaultTimeout: TimeInterval = 30.0, orchestrator: PlaywrightOrchestrator? = nil) {
         self.webView = webView
@@ -87,8 +89,6 @@ final class PlaywrightPage: Identifiable {
         webView.navigationDelegate = navigationDelegate
     }
 
-    // MARK: - Navigation
-
     func goto(_ urlString: String, waitUntil: NavigationWaitCondition = .load, timeout: TimeInterval? = nil) async throws {
         let effectiveTimeout = timeout ?? defaultTimeout
         guard let url = URL(string: urlString) else {
@@ -97,12 +97,9 @@ final class PlaywrightPage: Identifiable {
 
         trace(.navigation, "goto(\(urlString))")
         navigationDelegate.reset()
-
+        networkIdleInjected = false
         webView.load(URLRequest(url: url))
-
-        try await injectNetworkIdleMonitor()
         try await waitForNavigation(condition: waitUntil, timeout: effectiveTimeout)
-
         trace(.navigation, "goto complete — \(webView.url?.absoluteString ?? "unknown")")
     }
 
@@ -110,6 +107,7 @@ final class PlaywrightPage: Identifiable {
         let effectiveTimeout = timeout ?? defaultTimeout
         trace(.navigation, "reload()")
         navigationDelegate.reset()
+        networkIdleInjected = false
         webView.reload()
         try await waitForNavigation(condition: waitUntil, timeout: effectiveTimeout)
     }
@@ -117,6 +115,7 @@ final class PlaywrightPage: Identifiable {
     func goBack() async throws {
         trace(.navigation, "goBack()")
         navigationDelegate.reset()
+        networkIdleInjected = false
         webView.goBack()
         try await waitForNavigation(condition: .load, timeout: defaultTimeout)
     }
@@ -124,6 +123,7 @@ final class PlaywrightPage: Identifiable {
     func goForward() async throws {
         trace(.navigation, "goForward()")
         navigationDelegate.reset()
+        networkIdleInjected = false
         webView.goForward()
         try await waitForNavigation(condition: .load, timeout: defaultTimeout)
     }
@@ -139,7 +139,49 @@ final class PlaywrightPage: Identifiable {
         try await Task.sleep(for: .milliseconds(ms))
     }
 
-    // MARK: - Locators
+    func waitForPostActionSettle(timeout: TimeInterval? = nil) async {
+        let effectiveTimeout = timeout ?? 2.5
+        let networkIdleTimeout = min(effectiveTimeout, 2.0)
+        let domTimeout = min(effectiveTimeout, 1.5)
+
+        _ = try? await waitForLoadState(.domContentLoaded, timeout: domTimeout)
+        _ = try? await waitForLoadState(.networkIdle, timeout: networkIdleTimeout)
+        if speedMode.postSubmitSettleMs > 0 {
+            try? await Task.sleep(for: .milliseconds(speedMode.postSubmitSettleMs))
+        }
+    }
+
+    func waitForURLChange(from previousURL: String, timeout: TimeInterval? = nil) async -> Bool {
+        let effectiveTimeout = timeout ?? defaultTimeout
+        let deadline = Date().addingTimeInterval(effectiveTimeout)
+        let normalizedPreviousURL = previousURL.lowercased()
+
+        while Date() < deadline {
+            let currentURL = url().lowercased()
+            if !currentURL.isEmpty && currentURL != normalizedPreviousURL {
+                return true
+            }
+            try? await Task.sleep(for: .milliseconds(speedMode.actionabilityPollMs))
+        }
+
+        return false
+    }
+
+    func currentReadyState() async -> String {
+        ((try? await evaluate("document.readyState")) as String?) ?? "loading"
+    }
+
+    func bodyText() async throws -> String {
+        try await evaluate(
+            """
+            (function() {
+                var body = document.body;
+                if (!body) return '';
+                return body.innerText || body.textContent || '';
+            })()
+            """
+        )
+    }
 
     func locator(_ selector: String, timeout: TimeInterval? = nil) -> Locator {
         Locator(page: self, selector: selector, timeout: timeout ?? defaultTimeout)
@@ -170,13 +212,9 @@ final class PlaywrightPage: Identifiable {
         Locator(page: self, selector: "[data-testid=\"\(testId)\"]", timeout: defaultTimeout)
     }
 
-    // MARK: - Expectations
-
     func expect(_ locator: Locator) -> Expectation {
         Expectation(locator: locator, page: self)
     }
-
-    // MARK: - JavaScript Evaluation
 
     func evaluate<T>(_ script: String) async throws -> T {
         trace(.evaluate, "evaluate(\(String(script.prefix(80)))...)")
@@ -214,8 +252,6 @@ final class PlaywrightPage: Identifiable {
         }
     }
 
-    // MARK: - Screenshot
-
     func screenshot() async throws -> Data {
         trace(.screenshot, "screenshot()")
         let config = WKSnapshotConfiguration()
@@ -234,8 +270,6 @@ final class PlaywrightPage: Identifiable {
         }
     }
 
-    // MARK: - Page Info
-
     func url() -> String {
         webView.url?.absoluteString ?? ""
     }
@@ -244,13 +278,9 @@ final class PlaywrightPage: Identifiable {
         try await evaluate("document.title")
     }
 
-    // MARK: - Close
-
     func close() {
         orchestrator?.closePage(self)
     }
-
-    // MARK: - Tracing
 
     func startTracing() {
         tracingEnabled = true
@@ -276,58 +306,82 @@ final class PlaywrightPage: Identifiable {
         ))
     }
 
-    // MARK: - Private: Network Idle Monitor
-
     private func injectNetworkIdleMonitor() async throws {
-        guard !networkIdleInjected else { return }
+        if networkIdleInjected {
+            let alreadyInstalled: Bool = ((try? await evaluate("Boolean(window.__pwNetworkMonitor)")) as Bool?) ?? false
+            if alreadyInstalled {
+                return
+            }
+            networkIdleInjected = false
+        }
 
         let monitorJS = """
         (function() {
-            if (window.__pwNetworkMonitor) return;
-            window.__pwNetworkMonitor = {pending: 0, lastActivity: Date.now()};
-            var m = window.__pwNetworkMonitor;
-            var _fetch = window.fetch;
-            window.fetch = function() {
-                m.pending++;
-                m.lastActivity = Date.now();
-                return _fetch.apply(this, arguments).finally(function() {
-                    m.pending = Math.max(0, m.pending - 1);
-                    m.lastActivity = Date.now();
-                });
-            };
-            var _open = XMLHttpRequest.prototype.open;
-            var _send = XMLHttpRequest.prototype.send;
+            if (window.__pwNetworkMonitor) return true;
+            window.__pwNetworkMonitor = { pending: 0, lastActivity: Date.now() };
+            var monitor = window.__pwNetworkMonitor;
+
+            var originalFetch = window.fetch;
+            if (typeof originalFetch === 'function') {
+                window.fetch = function() {
+                    monitor.pending += 1;
+                    monitor.lastActivity = Date.now();
+                    return originalFetch.apply(this, arguments).finally(function() {
+                        monitor.pending = Math.max(0, monitor.pending - 1);
+                        monitor.lastActivity = Date.now();
+                    });
+                };
+            }
+
+            var originalOpen = XMLHttpRequest.prototype.open;
+            var originalSend = XMLHttpRequest.prototype.send;
             XMLHttpRequest.prototype.open = function() {
-                this.__pw_tracked = true;
-                return _open.apply(this, arguments);
+                this.__pwTracked = true;
+                return originalOpen.apply(this, arguments);
             };
             XMLHttpRequest.prototype.send = function() {
-                if (this.__pw_tracked) {
-                    m.pending++;
-                    m.lastActivity = Date.now();
+                if (this.__pwTracked) {
+                    monitor.pending += 1;
+                    monitor.lastActivity = Date.now();
                     this.addEventListener('loadend', function() {
-                        m.pending = Math.max(0, m.pending - 1);
-                        m.lastActivity = Date.now();
+                        monitor.pending = Math.max(0, monitor.pending - 1);
+                        monitor.lastActivity = Date.now();
                     });
                 }
-                return _send.apply(this, arguments);
+                return originalSend.apply(this, arguments);
             };
-        })();
+
+            return true;
+        })()
         """
 
-        try await evaluateVoid(monitorJS)
-        networkIdleInjected = true
-    }
+        let deadline = Date().addingTimeInterval(3)
+        var lastError: Error?
 
-    // MARK: - Private: Navigation Wait
+        while Date() < deadline {
+            do {
+                let installed: Bool = try await evaluate(monitorJS)
+                if installed {
+                    networkIdleInjected = true
+                    return
+                }
+            } catch {
+                lastError = error
+            }
+
+            try await Task.sleep(for: .milliseconds(speedMode.actionabilityPollMs))
+        }
+
+        throw lastError ?? PlaywrightError.javaScriptError("Failed to install network idle monitor")
+    }
 
     private func waitForNavigation(condition: NavigationWaitCondition, timeout: TimeInterval) async throws {
         let deadline = Date().addingTimeInterval(timeout)
-        let pollInterval: TimeInterval = 0.1
+        let pollIntervalMs = speedMode.actionabilityPollMs
 
         while Date() < deadline {
-            if let navError = navigationDelegate.navigationError {
-                throw PlaywrightError.navigationFailed(navError.localizedDescription)
+            if let navigationError = navigationDelegate.navigationError {
+                throw PlaywrightError.navigationFailed(navigationError.localizedDescription)
             }
 
             let satisfied: Bool
@@ -335,36 +389,43 @@ final class PlaywrightPage: Identifiable {
             case .load:
                 satisfied = navigationDelegate.didFinishLoad
             case .domContentLoaded:
-                let ready: String = (try? await evaluate("document.readyState")) ?? "loading"
-                satisfied = ready == "interactive" || ready == "complete"
+                let readyState = await currentReadyState()
+                satisfied = readyState == "interactive" || readyState == "complete"
             case .networkIdle:
                 if !navigationDelegate.didFinishLoad {
                     satisfied = false
                 } else {
-                    let idleCheck = """
-                    (function() {
-                        var m = window.__pwNetworkMonitor;
-                        if (!m) return true;
-                        return m.pending === 0 && (Date.now() - m.lastActivity) > 500;
-                    })()
-                    """
-                    let isIdle: Bool = (try? await evaluate(idleCheck)) ?? true
-                    satisfied = isIdle
+                    _ = try? await injectNetworkIdleMonitor()
+                    let readyState = await currentReadyState()
+                    let isIdle = (try? await networkIsIdle()) ?? false
+                    satisfied = isIdle || readyState == "complete"
                 }
             }
 
             if satisfied {
-                try await Task.sleep(for: .milliseconds(Int(autoWaitStabilityDelay * 1000)))
+                if speedMode.postSubmitSettleMs > 0 {
+                    try await Task.sleep(for: .milliseconds(speedMode.postSubmitSettleMs))
+                }
                 return
             }
 
-            try await Task.sleep(for: .milliseconds(Int(pollInterval * 1000)))
+            try await Task.sleep(for: .milliseconds(pollIntervalMs))
         }
 
-        throw PlaywrightError.timeout("Navigation timed out after \(Int(timeout))s (condition: \(condition))")
+        throw PlaywrightError.timeout("Navigation timed out after \(Int(timeout))s (condition: \(condition.rawValue))")
     }
 
-    // MARK: - Private: Role Mapping
+    private func networkIsIdle() async throws -> Bool {
+        let quietWindowMs = max(500, speedMode.postSubmitPollMs)
+        let idleCheck = """
+        (function() {
+            var monitor = window.__pwNetworkMonitor;
+            if (!monitor) return document.readyState === 'complete';
+            return monitor.pending === 0 && (Date.now() - monitor.lastActivity) >= \(quietWindowMs);
+        })()
+        """
+        return try await evaluate(idleCheck)
+    }
 
     private func roleAttribute(_ role: String) -> String {
         switch role.lowercased() {
@@ -389,8 +450,6 @@ final class PlaywrightPage: Identifiable {
     }
 }
 
-// MARK: - Navigation Delegate
-
 private final class PageNavigationDelegate: NSObject, WKNavigationDelegate {
     var didFinishLoad: Bool = false
     var navigationError: Error?
@@ -401,13 +460,17 @@ private final class PageNavigationDelegate: NSObject, WKNavigationDelegate {
     }
 
     nonisolated func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        Task { @MainActor in self.didFinishLoad = true }
+        Task { @MainActor in
+            self.didFinishLoad = true
+        }
     }
 
     nonisolated func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
         Task { @MainActor in
             let nsError = error as NSError
-            if nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorCancelled { return }
+            if nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorCancelled {
+                return
+            }
             self.navigationError = error
             self.didFinishLoad = true
         }
@@ -416,7 +479,9 @@ private final class PageNavigationDelegate: NSObject, WKNavigationDelegate {
     nonisolated func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
         Task { @MainActor in
             let nsError = error as NSError
-            if nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorCancelled { return }
+            if nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorCancelled {
+                return
+            }
             self.navigationError = error
             self.didFinishLoad = true
         }

@@ -60,6 +60,78 @@ nonisolated enum SpeedMode: String, Sendable, CaseIterable, Codable {
         }
     }
 
+    var navigationTimeoutSeconds: TimeInterval {
+        switch self {
+        case .speedDemon: 18
+        case .balanced: 25
+        case .slowDebug: 40
+        case .maxConcurrency: 20
+        }
+    }
+
+    var selectorTimeoutSeconds: TimeInterval {
+        switch self {
+        case .speedDemon: 8
+        case .balanced: 12
+        case .slowDebug: 20
+        case .maxConcurrency: 9
+        }
+    }
+
+    var postSubmitObservationSeconds: TimeInterval {
+        switch self {
+        case .speedDemon: 5
+        case .balanced: 9
+        case .slowDebug: 16
+        case .maxConcurrency: 6
+        }
+    }
+
+    var postSubmitPollMs: Int {
+        switch self {
+        case .speedDemon: 125
+        case .balanced: 175
+        case .slowDebug: 250
+        case .maxConcurrency: 125
+        }
+    }
+
+    var postSubmitSettleMs: Int {
+        switch self {
+        case .speedDemon: 200
+        case .balanced: 450
+        case .slowDebug: 900
+        case .maxConcurrency: 250
+        }
+    }
+
+    var actionabilityPollMs: Int {
+        switch self {
+        case .speedDemon: 60
+        case .balanced: 90
+        case .slowDebug: 140
+        case .maxConcurrency: 70
+        }
+    }
+
+    var requiredStableActionPolls: Int {
+        switch self {
+        case .speedDemon: 2
+        case .balanced: 2
+        case .slowDebug: 3
+        case .maxConcurrency: 2
+        }
+    }
+
+    var maximumActionRetries: Int {
+        switch self {
+        case .speedDemon: 2
+        case .balanced: 3
+        case .slowDebug: 4
+        case .maxConcurrency: 3
+        }
+    }
+
     func typingDelayWithVariance() -> Int {
         let variance = Int.random(in: humanVarianceRange)
         return typingDelayMs + variance

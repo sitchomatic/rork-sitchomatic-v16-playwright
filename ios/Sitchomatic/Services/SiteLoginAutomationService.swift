@@ -5,7 +5,6 @@ final class SiteLoginAutomationService {
     static let shared = SiteLoginAutomationService()
 
     private let logger: DebugLogger = .shared
-    private let selectorPollInterval: Duration = .milliseconds(150)
 
     private init() {}
 
@@ -27,38 +26,47 @@ final class SiteLoginAutomationService {
         )
 
         do {
-            try await page.goto(loginURL, waitUntil: .networkIdle, timeout: 30)
+            try await page.goto(
+                loginURL,
+                waitUntil: .domContentLoaded,
+                timeout: speedMode.navigationTimeoutSeconds
+            )
+            await page.waitForPostActionSettle(timeout: min(3.0, speedMode.navigationTimeoutSeconds))
 
-            let usernameSelector: String = try await resolveFirstAvailableSelector(
+            let usernameMatch = try await resolveFirstAvailableSelector(
                 site.usernameSelectors,
                 on: page,
-                timeout: 12
+                timeout: speedMode.selectorTimeoutSeconds
             )
-            let passwordSelector: String = try await resolveFirstAvailableSelector(
+            let passwordMatch = try await resolveFirstAvailableSelector(
                 site.passwordSelectors,
                 on: page,
-                timeout: 12
+                timeout: speedMode.selectorTimeoutSeconds
             )
-            let submitSelector: String = try await resolveFirstAvailableSelector(
+            let submitMatch = try await resolveFirstAvailableSelector(
                 site.submitSelectors,
                 on: page,
-                timeout: 12
+                timeout: speedMode.selectorTimeoutSeconds
             )
 
-            page.trace(.action, "Resolved selectors — username: \(usernameSelector), password: \(passwordSelector), submit: \(submitSelector)")
+            page.trace(
+                .action,
+                "Resolved selectors — username: \(usernameMatch.selector), password: \(passwordMatch.selector), submit: \(submitMatch.selector)"
+            )
 
-            try await page.locator(usernameSelector).fill(credential.username)
-            try await page.locator(passwordSelector).fill(credential.password)
-            try await page.locator(submitSelector).click()
+            try await usernameMatch.locator.fill(credential.username)
+            try await passwordMatch.locator.fill(credential.password)
 
-            try? await page.waitForLoadState(.networkIdle, timeout: 8)
-            try await page.waitForTimeout(speedMode.postSubmitWaitMs)
+            let previousURL: String = page.url()
+            try await submitMatch.locator.click()
 
-            let outcome: DualLoginOutcome = try await classifyOutcome(
+            let outcome: DualLoginOutcome = try await observePostSubmitOutcome(
                 on: page,
                 site: site,
                 loginURL: loginURL,
-                submitSelector: submitSelector
+                previousURL: previousURL,
+                submitSelector: submitMatch.selector,
+                speedMode: speedMode
             )
 
             page.trace(.assertion, "Site login classified as \(outcome.rawValue) for \(site.rawValue)")
@@ -107,48 +115,124 @@ final class SiteLoginAutomationService {
         _ selectors: [String],
         on page: PlaywrightPage,
         timeout: TimeInterval
-    ) async throws -> String {
+    ) async throws -> SelectorMatch {
         let deadline: Date = Date().addingTimeInterval(timeout)
+        let perSelectorTimeout: TimeInterval = min(1.0, timeout)
 
         while Date() < deadline {
             for selector in selectors {
-                let locator: Locator = page.locator(selector)
-                let exists: Bool = ((try? await locator.count()) ?? 0) > 0
-                let visible: Bool = (try? await locator.isVisible()) ?? false
-                if exists || visible {
-                    return selector
+                let locator: Locator = page.locator(selector, timeout: timeout)
+                do {
+                    try await locator.waitFor(state: .visible, timeout: perSelectorTimeout)
+                    return SelectorMatch(selector: selector, locator: locator)
+                } catch {
+                    let attached = (try? await locator.count()) ?? 0
+                    if attached > 0 {
+                        return SelectorMatch(selector: selector, locator: locator)
+                    }
                 }
             }
-            try await Task.sleep(for: selectorPollInterval)
+            try await Task.sleep(for: .milliseconds(120))
         }
 
         throw PlaywrightError.elementNotFound(selectors.joined(separator: " | "))
     }
 
-    private func classifyOutcome(
+    private func observePostSubmitOutcome(
         on page: PlaywrightPage,
         site: AutomationSite,
         loginURL: String,
-        submitSelector: String
+        previousURL: String,
+        submitSelector: String,
+        speedMode: SpeedMode
     ) async throws -> DualLoginOutcome {
-        let currentURL: String = page.url().lowercased()
-        let pageText: String = try await readVisibleText(on: page)
-        let loweredText: String = pageText.lowercased()
-        let submitStillVisible: Bool = (try? await page.locator(submitSelector).isVisible()) ?? false
+        let observationDeadline: Date = Date().addingTimeInterval(speedMode.postSubmitObservationSeconds)
+        var urlChanged: Bool = false
+        var lastObservedText: String = ""
+        var submitStillVisible: Bool = true
 
-        if containsAny(site.permanentFailureTextHints, in: loweredText) || containsAny(site.invalidCredentialTextHints, in: loweredText) {
+        await page.waitForPostActionSettle(timeout: 2.0)
+
+        while Date() < observationDeadline {
+            if !urlChanged {
+                urlChanged = await page.waitForURLChange(from: previousURL, timeout: 0.6)
+            }
+
+            let pageText: String = (try? await page.bodyText()) ?? ""
+            lastObservedText = pageText.lowercased()
+            submitStillVisible = (try? await page.locator(submitSelector).isVisible()) ?? false
+
+            let outcome: DualLoginOutcome = classifyOutcome(
+                site: site,
+                loginURL: loginURL,
+                currentURL: page.url().lowercased(),
+                pageText: lastObservedText,
+                submitStillVisible: submitStillVisible,
+                urlChanged: urlChanged
+            )
+
+            if outcome != .unsure {
+                return outcome
+            }
+
+            try await Task.sleep(for: .milliseconds(speedMode.postSubmitPollMs))
+        }
+
+        return classifyFinalOutcome(
+            site: site,
+            loginURL: loginURL,
+            currentURL: page.url().lowercased(),
+            pageText: lastObservedText,
+            submitStillVisible: submitStillVisible,
+            urlChanged: urlChanged
+        )
+    }
+
+    private func classifyOutcome(
+        site: AutomationSite,
+        loginURL: String,
+        currentURL: String,
+        pageText: String,
+        submitStillVisible: Bool,
+        urlChanged: Bool
+    ) -> DualLoginOutcome {
+        if containsAny(site.permanentFailureTextHints, in: pageText) || containsAny(site.invalidCredentialTextHints, in: pageText) {
             return .permDisabled
         }
 
-        if containsAny(site.temporaryFailureTextHints, in: loweredText) {
+        if containsAny(site.temporaryFailureTextHints, in: pageText) {
             return .tempDisabled
         }
 
-        let movedAwayFromLogin: Bool = !site.matchesLoginURL(currentURL) && currentURL != normalizedURL(loginURL, fallback: site.defaultLoginURL).lowercased()
-        let successHintPresent: Bool = containsAny(site.successTextHints, in: loweredText)
+        let normalizedLoginURL: String = normalizedURL(loginURL, fallback: site.defaultLoginURL).lowercased()
+        let movedAwayFromLogin: Bool = !site.matchesLoginURL(currentURL) && currentURL != normalizedLoginURL
+        let successHintPresent: Bool = containsAny(site.successTextHints, in: pageText)
 
-        if successHintPresent || movedAwayFromLogin {
+        if successHintPresent || movedAwayFromLogin || (urlChanged && !submitStillVisible) {
             return .success
+        }
+
+        return .unsure
+    }
+
+    private func classifyFinalOutcome(
+        site: AutomationSite,
+        loginURL: String,
+        currentURL: String,
+        pageText: String,
+        submitStillVisible: Bool,
+        urlChanged: Bool
+    ) -> DualLoginOutcome {
+        let provisional = classifyOutcome(
+            site: site,
+            loginURL: loginURL,
+            currentURL: currentURL,
+            pageText: pageText,
+            submitStillVisible: submitStillVisible,
+            urlChanged: urlChanged
+        )
+        if provisional != .unsure {
+            return provisional
         }
 
         if submitStillVisible {
@@ -156,17 +240,6 @@ final class SiteLoginAutomationService {
         }
 
         return .tempDisabled
-    }
-
-    private func readVisibleText(on page: PlaywrightPage) async throws -> String {
-        let script: String = """
-        (function() {
-            var body = document.body;
-            if (!body) return '';
-            return body.innerText || body.textContent || '';
-        })()
-        """
-        return try await page.evaluate(script)
     }
 
     private func containsAny(_ hints: [String], in text: String) -> Bool {
@@ -177,4 +250,9 @@ final class SiteLoginAutomationService {
         let trimmedValue: String = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         return trimmedValue.isEmpty ? fallback : trimmedValue
     }
+}
+
+private nonisolated struct SelectorMatch: Sendable {
+    let selector: String
+    let locator: Locator
 }

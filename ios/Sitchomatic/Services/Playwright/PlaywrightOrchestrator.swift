@@ -285,10 +285,12 @@ final class PlaywrightOrchestrator {
         statusMessage = "Creating page \(pageCounter)..."
 
         let sessionID = "page-\(pageCounter)-\(UUID().uuidString.prefix(6))"
+        let networkConfig = networkManager.networkConfiguration(forSessionID: sessionID)
         let webView = await pool.acquire(
+            sessionID: sessionID,
             stealthEnabled: settings.stealthEnabled,
             viewportSize: effectiveViewport,
-            networkConfig: networkManager.currentNetworkConfig,
+            networkConfig: networkConfig,
             target: .joe
         )
 
@@ -371,15 +373,19 @@ final class PlaywrightOrchestrator {
 
         log(.dualMode, "Creating paired pages — credential: \(credential.displayName), proxy: \(sharedProxyEndpoint)")
 
-        let networkConfig = networkManager.currentNetworkConfig
+        let networkConfig = networkManager.networkConfiguration(forSessionID: sharedProxySessionID)
+        let joeSessionID = "\(sharedProxySessionID)-joe-\(UUID().uuidString.prefix(4))"
+        let ignitionSessionID = "\(sharedProxySessionID)-ignition-\(UUID().uuidString.prefix(4))"
 
         async let joeWebViewTask: WKWebView = pool.acquire(
+            sessionID: joeSessionID,
             stealthEnabled: settings.stealthEnabled,
             viewportSize: defaultViewportSize,
             networkConfig: networkConfig,
             target: .joe
         )
         async let ignitionWebViewTask: WKWebView = pool.acquire(
+            sessionID: ignitionSessionID,
             stealthEnabled: settings.stealthEnabled,
             viewportSize: defaultViewportSize,
             networkConfig: networkConfig,
@@ -393,9 +399,6 @@ final class PlaywrightOrchestrator {
             injectEnhancedStealth(into: joeWebView)
             injectEnhancedStealth(into: ignitionWebView)
         }
-
-        applySharedProxy(to: joeWebView, sessionID: sharedProxySessionID)
-        applySharedProxy(to: ignitionWebView, sessionID: sharedProxySessionID)
 
         let joePageID = UUID()
         let ignitionPageID = UUID()
@@ -427,7 +430,7 @@ final class PlaywrightOrchestrator {
         statusMessage = "Ready — \(pages.count) pages (\(activePairedSessions) pairs)"
 
         log(.dualMode, "Paired pages created — joe: \(joePageID.uuidString.prefix(8)), ignition: \(ignitionPageID.uuidString.prefix(8)), shared proxy: \(sharedProxyEndpoint)")
-        log(.stealth, "Both pages have unique fingerprints via pool rotation + enhanced stealth injection")
+        log(.stealth, "Both pages use isolated WebKit stores and process pools with independent history, cookies, and storage")
 
         return PairedPageResult(
             joePage: joePage,
@@ -889,22 +892,6 @@ final class PlaywrightOrchestrator {
             forMainFrameOnly: false
         )
         webView.configuration.userContentController.addUserScript(userScript)
-    }
-
-    // MARK: - Private: Shared Proxy Application
-
-    private func applySharedProxy(to webView: WKWebView, sessionID: String) {
-        guard let endpoint = networkManager.proxyEndpoint(forSessionID: sessionID) else {
-            return
-        }
-
-        let proxyConfig = ProxyConfigurationHelper.createProxyConfiguration(
-            host: endpoint.host,
-            port: endpoint.port
-        )
-        if let proxyConfig {
-            webView.configuration.websiteDataStore.proxyConfigurations = [proxyConfig]
-        }
     }
 
     // MARK: - Private: Failure Artifact Saving

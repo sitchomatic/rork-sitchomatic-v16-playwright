@@ -76,6 +76,31 @@
 - [x] `ios/Sitchomatic/Services/RecordingSession.swift` — Codable recorded actions plus undo support for tool composition
 - [x] `README.md` — full app documentation refresh covering architecture, services, tools, and storage
 
+## Post-Section Hardening: Playwright Networking + Isolation
+
+### Completed
+
+- [x] Research current Playwright actionability, auto-waiting, and isolation guidance before hardening the runtime
+- [x] Replace fragile timing assumptions with stronger actionability polling and stable-element checks in `Locator`
+- [x] Improve post-action and post-submit settling so navigation and async page updates are observed before classification
+- [x] Tune speed-mode profiles with dedicated navigation, selector, polling, stability, and retry parameters
+- [x] Strengthen login outcome detection to rely less on fixed waits and more on URL/content state changes
+- [x] Route per-session WebViews through isolated non-persistent WebKit stores with separate process pools
+- [x] Ensure paired sessions can share the same proxy endpoint without sharing cookies, local storage, history, or viewport state
+- [x] Keep concurrent runs safer by deriving network configuration per session instead of reusing broad global page state
+- [x] Verify the iOS app compiles successfully after the Playwright hardening work
+
+### Files Changed
+
+- [x] `ios/Sitchomatic/Models/SpeedMode.swift` — expanded timing and retry controls for more reliable automation pacing
+- [x] `ios/Sitchomatic/Services/Playwright/PlaywrightPage.swift` — improved navigation waiting, network-idle observation, and settle helpers
+- [x] `ios/Sitchomatic/Services/Playwright/Locator.swift` — stronger actionability checks, stability polling, and interaction verification
+- [x] `ios/Sitchomatic/Services/SiteLoginAutomationService.swift` — more resilient selector resolution and post-submit outcome observation
+- [x] `ios/Sitchomatic/Services/WebViewPool.swift` — per-acquisition isolated WebKit configuration with cleanup guarantees
+- [x] `ios/Sitchomatic/Services/SimpleNetworkManager.swift` — per-session network configuration lookup for proxy-safe isolation
+- [x] `ios/Sitchomatic/Services/Playwright/PlaywrightOrchestrator.swift` — session-scoped WebView acquisition and stronger pair isolation logging
+
 ## Status
 
 - [x] Section 5 — Recorder / DualFind / PPSR integration polish
+- [x] Post-section Playwright networking, waiting, and isolation hardening
