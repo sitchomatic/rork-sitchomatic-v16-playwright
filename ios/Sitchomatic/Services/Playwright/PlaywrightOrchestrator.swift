@@ -173,6 +173,7 @@ final class PlaywrightOrchestrator {
     private let fileStorage: PersistentFileStorageService = .shared
     private let logger: DebugLogger = .shared
     private let backgroundService: BackgroundTaskService = .shared
+    private let settings: AutomationSettings = .shared
 
     private let defaultViewportSize: CGSize = CGSize(width: 390, height: 844)
     private let maxConcurrentPages: Int = 24
@@ -203,9 +204,11 @@ final class PlaywrightOrchestrator {
         pageCounter = 0
         activePairedSessions = 0
         lastDualResults.removeAll()
+        proxySessionMap.removeAll()
         credentialProxyMap.removeAll()
         recoveryAttempts.removeAll()
         activeSpeedMode = speedMode
+        globalTracingEnabled = settings.enableTracing
 
         log(.system, "Sitchomatic v16 Playwright Edition — session starting")
         log(.speed, "Speed mode: \(speedMode.displayName) (typing: \(speedMode.typingDelayMs)ms, action: \(speedMode.actionDelayMs)ms, post-submit: \(speedMode.postSubmitWaitMs)ms)")
@@ -247,6 +250,9 @@ final class PlaywrightOrchestrator {
         pages.removeAll()
         pageCounter = 0
         activePairedSessions = 0
+        proxySessionMap.removeAll()
+        credentialProxyMap.removeAll()
+        crashProtection.stopMonitoring()
         isReady = false
         statusMessage = "Session ended"
 
@@ -280,13 +286,15 @@ final class PlaywrightOrchestrator {
 
         let sessionID = "page-\(pageCounter)-\(UUID().uuidString.prefix(6))"
         let webView = await pool.acquire(
-            stealthEnabled: true,
+            stealthEnabled: settings.stealthEnabled,
             viewportSize: effectiveViewport,
             networkConfig: networkManager.currentNetworkConfig,
             target: .joe
         )
 
-        injectEnhancedStealth(into: webView)
+        if settings.stealthEnabled {
+            injectEnhancedStealth(into: webView)
+        }
 
         let proxyEndpoint = networkManager.proxyEndpoint(forSessionID: sessionID)
         if let ep = proxyEndpoint {
@@ -366,13 +374,13 @@ final class PlaywrightOrchestrator {
         let networkConfig = networkManager.currentNetworkConfig
 
         async let joeWebViewTask: WKWebView = pool.acquire(
-            stealthEnabled: true,
+            stealthEnabled: settings.stealthEnabled,
             viewportSize: defaultViewportSize,
             networkConfig: networkConfig,
             target: .joe
         )
         async let ignitionWebViewTask: WKWebView = pool.acquire(
-            stealthEnabled: true,
+            stealthEnabled: settings.stealthEnabled,
             viewportSize: defaultViewportSize,
             networkConfig: networkConfig,
             target: .ignition
@@ -381,8 +389,10 @@ final class PlaywrightOrchestrator {
         let joeWebView = await joeWebViewTask
         let ignitionWebView = await ignitionWebViewTask
 
-        injectEnhancedStealth(into: joeWebView)
-        injectEnhancedStealth(into: ignitionWebView)
+        if settings.stealthEnabled {
+            injectEnhancedStealth(into: joeWebView)
+            injectEnhancedStealth(into: ignitionWebView)
+        }
 
         applySharedProxy(to: joeWebView, sessionID: sharedProxySessionID)
         applySharedProxy(to: ignitionWebView, sessionID: sharedProxySessionID)
@@ -403,8 +413,10 @@ final class PlaywrightOrchestrator {
             orchestrator: self
         )
 
-        joePage.startTracing()
-        ignitionPage.startTracing()
+        if globalTracingEnabled {
+            joePage.startTracing()
+            ignitionPage.startTracing()
+        }
 
         pages.append(joePage)
         pages.append(ignitionPage)
@@ -437,7 +449,7 @@ final class PlaywrightOrchestrator {
         let startTime = Date()
         let speed = activeSpeedMode
 
-        log(.dualMode, "Dual login starting — credential: \(credential.displayName)")
+        log(.dualMode, "Dual login starting — credential: \(credential.displayName), joeURL: \(joeURL), ignitionURL: \(ignitionURL)")
 
         let pair: PairedPageResult
         do {
@@ -474,7 +486,6 @@ final class PlaywrightOrchestrator {
                     joeOutcome = .unsure
                     self.log(.error, "Joe flow error: \(error.localizedDescription)")
                 }
-                joeScreenshot = try? await pair.joePage.screenshot()
             }
 
             group.addTask { @MainActor in
@@ -486,13 +497,28 @@ final class PlaywrightOrchestrator {
                     ignitionOutcome = .unsure
                     self.log(.error, "Ignition flow error: \(error.localizedDescription)")
                 }
-                ignitionScreenshot = try? await pair.ignitionPage.screenshot()
             }
+        }
+
+        let preliminaryResult = DualLoginResult.combine(
+            credential: credential,
+            joeOutcome: joeOutcome,
+            ignitionOutcome: ignitionOutcome,
+            joeScreenshot: nil,
+            ignitionScreenshot: nil,
+            joeTrace: [],
+            ignitionTrace: [],
+            duration: Date().timeIntervalSince(startTime),
+            proxyUsed: pair.sharedProxyEndpoint
+        )
+
+        if preliminaryResult.outcome != .success && settings.captureScreenshotsOnFailure {
+            joeScreenshot = try? await pair.joePage.screenshot()
+            ignitionScreenshot = try? await pair.ignitionPage.screenshot()
         }
 
         let joeTrace = pair.joePage.tracingEnabled ? pair.joePage.stopTracing() : []
         let ignitionTrace = pair.ignitionPage.tracingEnabled ? pair.ignitionPage.stopTracing() : []
-
         let duration = Date().timeIntervalSince(startTime)
 
         let result = DualLoginResult.combine(
@@ -508,14 +534,19 @@ final class PlaywrightOrchestrator {
         )
 
         if result.outcome != .success {
-            saveFailureArtifacts(result: result)
+            saveFailureArtifacts(
+                result: result,
+                joeURL: joeURL,
+                ignitionURL: ignitionURL,
+                proxySessionID: pair.sharedProxySessionID
+            )
         }
 
         closePairedPages(joe: pair.joePage, ignition: pair.ignitionPage)
         totalCredentialsProcessed += 1
         lastDualResults.append(result)
 
-        log(.dualMode, "Dual login complete — credential: \(credential.displayName), outcome: \(result.outcome.rawValue), joe: \(joeOutcome.rawValue), ignition: \(ignitionOutcome.rawValue), duration: \(String(format: "%.1f", duration))s")
+        log(.dualMode, "Dual login complete — credential: \(credential.displayName), outcome: \(result.outcome.rawValue), joe: \(joeOutcome.rawValue), ignition: \(ignitionOutcome.rawValue), duration: \(String(format: "%.1f", duration))s, proxy: \(pair.sharedProxyEndpoint)")
 
         return result
     }
@@ -880,31 +911,59 @@ final class PlaywrightOrchestrator {
 
     // MARK: - Private: Failure Artifact Saving
 
-    private func saveFailureArtifacts(result: DualLoginResult) {
-        let timestamp = ISO8601DateFormatter().string(from: Date())
-        let credName = result.credential.displayName.replacingOccurrences(of: " ", with: "_")
-        let prefix = "failures/\(credName)_\(timestamp)"
+    private func saveFailureArtifacts(
+        result: DualLoginResult,
+        joeURL: String,
+        ignitionURL: String,
+        proxySessionID: String
+    ) {
+        let timestamp = ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: "-")
+        let artifactStem = sanitizedArtifactStem("\(result.credential.displayName)_\(timestamp)")
+        let screenshotPrefix = "failures/\(artifactStem)"
+        let traceDirectory = "failure_traces/\(artifactStem)"
+        let traceArchive = "failures/\(artifactStem)_trace.zip"
 
         if let joeScreenshot = result.joeScreenshot {
-            fileStorage.save(data: joeScreenshot, filename: "\(prefix)_joe.png")
+            fileStorage.save(data: joeScreenshot, filename: "\(screenshotPrefix)_joe.png")
         }
         if let ignitionScreenshot = result.ignitionScreenshot {
-            fileStorage.save(data: ignitionScreenshot, filename: "\(prefix)_ignition.png")
+            fileStorage.save(data: ignitionScreenshot, filename: "\(screenshotPrefix)_ignition.png")
         }
 
-        if !result.joeTrace.isEmpty || !result.ignitionTrace.isEmpty {
-            let traceData = formatTraceForExport(
-                joeTrace: result.joeTrace,
-                ignitionTrace: result.ignitionTrace,
-                credential: result.credential,
-                outcome: result.outcome
-            )
-            if let data = traceData.data(using: .utf8) {
-                fileStorage.save(data: data, filename: "\(prefix)_trace.json")
+        if fileStorage.createDirectory(at: traceDirectory) != nil {
+            let metadata: [String: Any] = [
+                "credential": result.credential.displayName,
+                "username": result.credential.username,
+                "outcome": result.outcome.rawValue,
+                "joeOutcome": result.joeOutcome.rawValue,
+                "ignitionOutcome": result.ignitionOutcome.rawValue,
+                "joeURL": joeURL,
+                "ignitionURL": ignitionURL,
+                "proxyUsed": result.proxyUsed,
+                "proxySessionID": proxySessionID,
+                "duration": result.duration,
+                "timestamp": timestamp,
+                "errorMessage": result.errorMessage ?? ""
+            ]
+
+            if let metadataData = try? JSONSerialization.data(withJSONObject: metadata, options: [.prettyPrinted, .sortedKeys]) {
+                fileStorage.save(data: metadataData, filename: "\(traceDirectory)/metadata.json")
             }
+
+            if !result.joeTrace.isEmpty {
+                let joeTraceText = result.joeTrace.map(\.formatted).joined(separator: "\n")
+                fileStorage.save(text: joeTraceText, filename: "\(traceDirectory)/joe.trace.log")
+            }
+
+            if !result.ignitionTrace.isEmpty {
+                let ignitionTraceText = result.ignitionTrace.map(\.formatted).joined(separator: "\n")
+                fileStorage.save(text: ignitionTraceText, filename: "\(traceDirectory)/ignition.trace.log")
+            }
+
+            _ = fileStorage.zipDirectory(at: traceDirectory, archiveFilename: traceArchive)
         }
 
-        log(.trace, "Failure artifacts saved for \(credName) — outcome: \(result.outcome.rawValue)")
+        log(.trace, "Failure artifacts saved for \(artifactStem) — outcome: \(result.outcome.rawValue), trace archive: \(traceArchive)")
     }
 
     private func saveTraceToFile(_ trace: [TraceEntry], pageID: UUID) {
@@ -916,28 +975,11 @@ final class PlaywrightOrchestrator {
         }
     }
 
-    private func formatTraceForExport(
-        joeTrace: [TraceEntry],
-        ignitionTrace: [TraceEntry],
-        credential: LoginCredential,
-        outcome: DualLoginOutcome
-    ) -> String {
-        let json: [String: Any] = [
-            "version": "v16",
-            "credential": credential.displayName,
-            "outcome": outcome.rawValue,
-            "timestamp": ISO8601DateFormatter().string(from: Date()),
-            "joeTraceCount": joeTrace.count,
-            "ignitionTraceCount": ignitionTrace.count,
-            "joeTrace": joeTrace.map { ["ts": $0.formatted, "cat": $0.category.rawValue, "msg": $0.message] },
-            "ignitionTrace": ignitionTrace.map { ["ts": $0.formatted, "cat": $0.category.rawValue, "msg": $0.message] }
-        ]
-        _ = json.count
-        if let data = try? JSONSerialization.data(withJSONObject: json, options: [.prettyPrinted, .sortedKeys]),
-           let str = String(data: data, encoding: .utf8) {
-            return str
-        }
-        return "{}"
+    private func sanitizedArtifactStem(_ value: String) -> String {
+        let invalidCharacters = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_" )).inverted
+        let pieces = value.components(separatedBy: invalidCharacters).filter { !$0.isEmpty }
+        let sanitized = pieces.joined(separator: "_")
+        return sanitized.isEmpty ? UUID().uuidString : sanitized
     }
 
     // MARK: - Private: Emergency State Persistence
