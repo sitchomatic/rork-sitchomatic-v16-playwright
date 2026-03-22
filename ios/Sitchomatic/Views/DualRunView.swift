@@ -13,6 +13,7 @@ struct DualRunView: View {
             VStack(spacing: 16) {
                 controlPanel
                 progressSection
+                categoryBreakdownSection
                 sessionSection
                 if !engine.isRunning && engine.state != .completed {
                     configSection
@@ -41,7 +42,7 @@ struct DualRunView: View {
                             .font(.headline)
                     }
 
-                    Text("\(enabledCredentialCount) enabled credentials • \(settings.maxConcurrentPairs) max pairs")
+                    Text("\(enabledCredentialCount) enabled credentials \u{2022} \(settings.maxConcurrentPairs) max pairs")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -122,7 +123,7 @@ struct DualRunView: View {
                 .tint(.cyan)
 
             HStack(spacing: 12) {
-                summaryTile(title: "Succeeded", value: "\(engine.succeededCount)", tint: .green)
+                summaryTile(title: "Success", value: "\(engine.succeededCount)", tint: .green)
                 summaryTile(title: "Failed", value: "\(engine.failedCount)", tint: .red)
                 summaryTile(title: "Active", value: "\(engine.activeCount)", tint: .cyan)
             }
@@ -135,6 +136,58 @@ struct DualRunView: View {
         }
         .padding(16)
         .background(.regularMaterial, in: .rect(cornerRadius: 20))
+    }
+
+    private var categoryBreakdownSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Result Categories")
+                .font(.headline)
+
+            let columns: [GridItem] = [
+                GridItem(.flexible(), spacing: 8),
+                GridItem(.flexible(), spacing: 8),
+                GridItem(.flexible(), spacing: 8)
+            ]
+
+            LazyVGrid(columns: columns, spacing: 8) {
+                ForEach(DualLoginOutcome.allCases, id: \.self) { outcome in
+                    categoryTile(outcome: outcome)
+                }
+            }
+        }
+        .padding(16)
+        .background(.regularMaterial, in: .rect(cornerRadius: 20))
+    }
+
+    private func categoryTile(outcome: DualLoginOutcome) -> some View {
+        let count: Int = {
+            switch outcome {
+            case .success: engine.succeededCount
+            case .noAccount: engine.noAccountCount
+            case .permDisabled: engine.permDisabledCount
+            case .tempDisabled: engine.tempDisabledCount
+            case .unsure: engine.unsureCount
+            case .error: engine.errorCount
+            }
+        }()
+
+        return HStack(spacing: 6) {
+            Image(systemName: outcome.iconName)
+                .font(.caption2)
+                .foregroundStyle(outcomeColor(outcome))
+            VStack(alignment: .leading, spacing: 1) {
+                Text(outcome.shortName)
+                    .font(.system(size: 9, weight: .bold, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                Text("\(count)")
+                    .font(.caption.weight(.heavy))
+                    .foregroundStyle(outcomeColor(outcome))
+            }
+            Spacer()
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(outcomeColor(outcome).opacity(0.08), in: .rect(cornerRadius: 10))
     }
 
     private var sessionSection: some View {
@@ -153,13 +206,16 @@ struct DualRunView: View {
                     .foregroundStyle(.secondary)
             }
 
-            HStack(spacing: 8) {
-                ForEach(SessionVisibilityFilter.allCases, id: \.self) { filter in
-                    filterChip(title: filter.title, count: count(for: filter), isSelected: sessionFilter == filter) {
-                        sessionFilter = filter
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(SessionVisibilityFilter.allCases, id: \.self) { filter in
+                        filterChip(filter: filter, count: count(for: filter), isSelected: sessionFilter == filter) {
+                            sessionFilter = filter
+                        }
                     }
                 }
             }
+            .contentMargins(.horizontal, 0)
 
             if filteredSessions.isEmpty {
                 ContentUnavailableView(
@@ -173,12 +229,7 @@ struct DualRunView: View {
             } else {
                 VStack(spacing: 10) {
                     ForEach(filteredSessions) { session in
-                        Button {
-                            selectedSession = session
-                        } label: {
-                            sessionRow(session)
-                        }
-                        .buttonStyle(.plain)
+                        sessionRow(session)
                     }
                 }
             }
@@ -188,19 +239,38 @@ struct DualRunView: View {
     private func sessionRow(_ session: ConcurrentSession) -> some View {
         VStack(spacing: 10) {
             HStack(alignment: .top) {
-                Image(systemName: session.phase.iconName)
-                    .foregroundStyle(phaseColor(session.phase))
-                    .frame(width: 20)
+                ZStack {
+                    if let result = session.dualResult {
+                        Image(systemName: result.outcome.iconName)
+                            .foregroundStyle(outcomeColor(result.outcome))
+                    } else {
+                        Image(systemName: session.phase.iconName)
+                            .foregroundStyle(phaseColor(session.phase))
+                    }
+                }
+                .frame(width: 22)
 
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(session.credential.username)
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.primary)
-                        .lineLimit(1)
+                    HStack(spacing: 6) {
+                        Text(session.credential.username)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.primary)
+                            .lineLimit(1)
+                        if session.isFlaggedForReview {
+                            Image(systemName: "flag.fill")
+                                .font(.caption2)
+                                .foregroundStyle(.yellow)
+                        }
+                    }
 
                     HStack(spacing: 8) {
-                        Text(session.phase.displayName)
-                            .foregroundStyle(phaseColor(session.phase))
+                        if let result = session.dualResult {
+                            Text(result.outcome.shortName)
+                                .foregroundStyle(outcomeColor(result.outcome))
+                        } else {
+                            Text(session.phase.displayName)
+                                .foregroundStyle(phaseColor(session.phase))
+                        }
                         Text("Wave \(session.waveIndex + 1)")
                             .foregroundStyle(.secondary)
                         Text(session.proxyInfo)
@@ -260,9 +330,53 @@ struct DualRunView: View {
                     .font(.caption.weight(.bold))
                     .foregroundStyle(.tertiary)
             }
+
+            if session.phase.isTerminal {
+                HStack(spacing: 10) {
+                    if session.phase == .failed {
+                        Button {
+                            engine.enqueueRetry(session.credential)
+                        } label: {
+                            Label("Retry", systemImage: "arrow.clockwise")
+                                .font(.caption.weight(.semibold))
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(.orange)
+                        .controlSize(.small)
+                    }
+
+                    Button {
+                        UIPasteboard.general.string = session.credential.username
+                    } label: {
+                        Label("Copy", systemImage: "doc.on.doc")
+                            .font(.caption.weight(.semibold))
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(.blue)
+                    .controlSize(.small)
+
+                    Button {
+                        session.toggleFlagged()
+                    } label: {
+                        Label(
+                            session.isFlaggedForReview ? "Unflag" : "Flag",
+                            systemImage: session.isFlaggedForReview ? "flag.slash.fill" : "flag.fill"
+                        )
+                        .font(.caption.weight(.semibold))
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(.yellow)
+                    .controlSize(.small)
+
+                    Spacer()
+                }
+            }
         }
         .padding(14)
         .background(.regularMaterial, in: .rect(cornerRadius: 18))
+        .onTapGesture {
+            selectedSession = session
+        }
     }
 
     private func proofThumb(label: String, data: Data?, outcome: DualLoginOutcome?) -> some View {
@@ -307,10 +421,10 @@ struct DualRunView: View {
 
     private func resultChip(_ outcome: DualLoginOutcome, label: String) -> some View {
         HStack(spacing: 5) {
-            Circle()
-                .fill(outcomeColor(outcome))
-                .frame(width: 6, height: 6)
-            Text("\(label): \(outcome.rawValue)")
+            Image(systemName: outcome.iconName)
+                .font(.system(size: 8))
+                .foregroundStyle(outcomeColor(outcome))
+            Text("\(label): \(outcome.shortName)")
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
         }
@@ -385,10 +499,12 @@ struct DualRunView: View {
         .background(.secondary.opacity(0.08), in: .rect(cornerRadius: 14))
     }
 
-    private func filterChip(title: String, count: Int, isSelected: Bool, action: @escaping () -> Void) -> some View {
+    private func filterChip(filter: SessionVisibilityFilter, count: Int, isSelected: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            HStack(spacing: 6) {
-                Text(title)
+            HStack(spacing: 5) {
+                Image(systemName: filter.iconName)
+                    .font(.system(size: 9))
+                Text(filter.title)
                 Text("\(count)")
                     .foregroundStyle(isSelected ? .cyan : .secondary)
             }
@@ -412,10 +528,18 @@ struct DualRunView: View {
             sessions = engine.sessions
         case .active:
             sessions = engine.sessions.filter { $0.phase.isActive || $0.phase == .queued }
-        case .failed:
-            sessions = engine.sessions.filter { $0.phase == .failed }
-        case .succeeded:
-            sessions = engine.sessions.filter { $0.phase == .succeeded }
+        case .success:
+            sessions = engine.sessions.filter { $0.dualResult?.outcome == .success }
+        case .noAccount:
+            sessions = engine.sessions.filter { $0.dualResult?.outcome == .noAccount }
+        case .permDisabled:
+            sessions = engine.sessions.filter { $0.dualResult?.outcome == .permDisabled }
+        case .tempDisabled:
+            sessions = engine.sessions.filter { $0.dualResult?.outcome == .tempDisabled }
+        case .unsure:
+            sessions = engine.sessions.filter { $0.dualResult?.outcome == .unsure }
+        case .error:
+            sessions = engine.sessions.filter { $0.dualResult?.outcome == .error }
         }
 
         return sessions.sorted { lhs, rhs in
@@ -431,14 +555,14 @@ struct DualRunView: View {
 
     private func count(for filter: SessionVisibilityFilter) -> Int {
         switch filter {
-        case .all:
-            engine.sessions.count
-        case .active:
-            engine.sessions.filter { $0.phase.isActive || $0.phase == .queued }.count
-        case .failed:
-            engine.sessions.filter { $0.phase == .failed }.count
-        case .succeeded:
-            engine.sessions.filter { $0.phase == .succeeded }.count
+        case .all: engine.sessions.count
+        case .active: engine.sessions.filter { $0.phase.isActive || $0.phase == .queued }.count
+        case .success: engine.sessions.filter { $0.dualResult?.outcome == .success }.count
+        case .noAccount: engine.sessions.filter { $0.dualResult?.outcome == .noAccount }.count
+        case .permDisabled: engine.sessions.filter { $0.dualResult?.outcome == .permDisabled }.count
+        case .tempDisabled: engine.sessions.filter { $0.dualResult?.outcome == .tempDisabled }.count
+        case .unsure: engine.sessions.filter { $0.dualResult?.outcome == .unsure }.count
+        case .error: engine.sessions.filter { $0.dualResult?.outcome == .error }.count
         }
     }
 
@@ -513,7 +637,7 @@ struct DualRunView: View {
         let usernameSelector: String = site.usernameSelectors.first ?? "n/a"
         let passwordSelector: String = site.passwordSelectors.first ?? "n/a"
         let submitSelector: String = site.submitSelectors.first ?? "n/a"
-        return "Selectors: \(usernameSelector) • \(passwordSelector) • \(submitSelector)"
+        return "Selectors: \(usernameSelector) \u{2022} \(passwordSelector) \u{2022} \(submitSelector)"
     }
 
     private func phaseColor(_ phase: SessionPhase) -> Color {
@@ -530,11 +654,11 @@ struct DualRunView: View {
         guard let outcome else { return .gray }
         switch outcome {
         case .success: return .green
+        case .noAccount: return .indigo
         case .permDisabled: return .red
         case .tempDisabled: return .orange
-        case .networkError: return .yellow
-        case .crashed: return .red
         case .unsure: return .purple
+        case .error: return .yellow
         }
     }
 }

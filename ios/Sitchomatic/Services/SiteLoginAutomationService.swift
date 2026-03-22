@@ -81,7 +81,7 @@ final class SiteLoginAutomationService {
                     category: .automation,
                     level: .error
                 )
-                return .networkError
+                return .error
             case .timeout(let message):
                 logger.log(
                     "\(site.displayName) timeout: \(message)",
@@ -90,7 +90,7 @@ final class SiteLoginAutomationService {
                 )
                 return .tempDisabled
             case .pageDisposed:
-                return .crashed
+                return .error
             case .elementNotFound, .elementNotInteractable, .elementNotVisible:
                 logger.log(
                     "\(site.displayName) selector failure: \(error.localizedDescription)",
@@ -99,7 +99,7 @@ final class SiteLoginAutomationService {
                 )
                 return .unsure
             case .javaScriptError, .screenshotFailed, .assertionFailed:
-                return .unsure
+                return .error
             }
         } catch {
             logger.log(
@@ -196,7 +196,11 @@ final class SiteLoginAutomationService {
         submitStillVisible: Bool,
         urlChanged: Bool
     ) -> DualLoginOutcome {
-        if containsAny(site.permanentFailureTextHints, in: pageText) || containsAny(site.invalidCredentialTextHints, in: pageText) {
+        if containsAny(site.invalidCredentialTextHints, in: pageText) {
+            return .noAccount
+        }
+
+        if containsAny(site.permanentFailureTextHints, in: pageText) {
             return .permDisabled
         }
 

@@ -47,10 +47,26 @@ nonisolated struct LoginCredential: Identifiable, Sendable, Codable, Hashable {
     var statusIcon: String {
         guard let outcome = lastOutcome else { return "circle" }
         switch outcome {
-        case "success": return "checkmark.circle.fill"
-        case "permDisabled": return "xmark.octagon.fill"
-        case "tempDisabled": return "exclamationmark.triangle.fill"
+        case "success": return "checkmark.seal.fill"
+        case "noAccount": return "person.slash.fill"
+        case "permDisabled": return "lock.slash.fill"
+        case "tempDisabled": return "clock.badge.exclamationmark.fill"
+        case "unsure": return "questionmark.diamond.fill"
+        case "error": return "exclamationmark.octagon.fill"
         default: return "questionmark.circle"
+        }
+    }
+
+    var statusColor: String {
+        guard let outcome = lastOutcome else { return "secondary" }
+        switch outcome {
+        case "success": return "green"
+        case "noAccount": return "indigo"
+        case "permDisabled": return "red"
+        case "tempDisabled": return "orange"
+        case "unsure": return "purple"
+        case "error": return "yellow"
+        default: return "secondary"
         }
     }
 }

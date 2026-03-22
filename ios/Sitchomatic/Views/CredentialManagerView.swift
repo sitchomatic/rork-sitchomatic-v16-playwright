@@ -98,7 +98,7 @@ struct CredentialManagerView: View {
     private func credentialRow(_ cred: LoginCredential) -> some View {
         HStack {
             Image(systemName: cred.statusIcon)
-                .foregroundStyle(cred.isEnabled ? .green : .secondary)
+                .foregroundStyle(credStatusColor(cred))
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(cred.username)
@@ -106,12 +106,16 @@ struct CredentialManagerView: View {
                 HStack(spacing: 8) {
                     Text("\(cred.totalAttempts) attempts")
                     if cred.successCount > 0 {
-                        Text("\(cred.successCount)✓")
+                        Text("\(cred.successCount) success")
                             .foregroundStyle(.green)
                     }
                     if cred.failCount > 0 {
-                        Text("\(cred.failCount)✗")
+                        Text("\(cred.failCount) fail")
                             .foregroundStyle(.red)
+                    }
+                    if let outcome = cred.lastOutcome {
+                        Text(outcomeShortName(outcome))
+                            .foregroundStyle(outcomeColorFromString(outcome))
                     }
                 }
                 .font(.system(size: 11))
@@ -130,6 +134,36 @@ struct CredentialManagerView: View {
                 }
             ))
             .labelsHidden()
+        }
+    }
+
+    private func credStatusColor(_ cred: LoginCredential) -> Color {
+        guard cred.isEnabled else { return .secondary }
+        guard let outcome = cred.lastOutcome else { return .green }
+        return outcomeColorFromString(outcome)
+    }
+
+    private func outcomeShortName(_ raw: String) -> String {
+        switch raw {
+        case "success": "Success"
+        case "noAccount": "No ACC"
+        case "permDisabled": "Perm Disabled"
+        case "tempDisabled": "Temp Disabled"
+        case "unsure": "Needs Review"
+        case "error": "Error Found"
+        default: raw
+        }
+    }
+
+    private func outcomeColorFromString(_ raw: String) -> Color {
+        switch raw {
+        case "success": .green
+        case "noAccount": .indigo
+        case "permDisabled": .red
+        case "tempDisabled": .orange
+        case "unsure": .purple
+        case "error": .yellow
+        default: .secondary
         }
     }
 

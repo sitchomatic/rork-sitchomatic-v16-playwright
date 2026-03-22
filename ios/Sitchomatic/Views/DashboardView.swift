@@ -43,6 +43,7 @@ struct DashboardView: View {
             ScrollView {
                 VStack(spacing: 18) {
                     heroCard
+                    categoryBreakdown
                     overviewGrid
                     sessionSection
                     toolsSection
@@ -122,6 +123,51 @@ struct DashboardView: View {
         .background(.ultraThinMaterial, in: .rect(cornerRadius: 22))
     }
 
+    private var categoryBreakdown: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Result Categories")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.white.opacity(0.62))
+
+            let columns: [GridItem] = [
+                GridItem(.flexible(), spacing: 8),
+                GridItem(.flexible(), spacing: 8),
+                GridItem(.flexible(), spacing: 8)
+            ]
+
+            LazyVGrid(columns: columns, spacing: 8) {
+                categoryChip(outcome: .success, count: engine.succeededCount)
+                categoryChip(outcome: .noAccount, count: engine.noAccountCount)
+                categoryChip(outcome: .permDisabled, count: engine.permDisabledCount)
+                categoryChip(outcome: .tempDisabled, count: engine.tempDisabledCount)
+                categoryChip(outcome: .unsure, count: engine.unsureCount)
+                categoryChip(outcome: .error, count: engine.errorCount)
+            }
+        }
+        .padding(14)
+        .background(.ultraThinMaterial, in: .rect(cornerRadius: 18))
+    }
+
+    private func categoryChip(outcome: DualLoginOutcome, count: Int) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: outcome.iconName)
+                .font(.caption2)
+                .foregroundStyle(outcomeColor(outcome))
+            VStack(alignment: .leading, spacing: 1) {
+                Text(outcome.shortName)
+                    .font(.system(size: 9, weight: .bold, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.8))
+                Text("\(count)")
+                    .font(.caption.weight(.heavy))
+                    .foregroundStyle(outcomeColor(outcome))
+            }
+            Spacer()
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(outcomeColor(outcome).opacity(0.12), in: .rect(cornerRadius: 10))
+    }
+
     private var overviewGrid: some View {
         let columns: [GridItem] = [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)]
 
@@ -129,7 +175,7 @@ struct DashboardView: View {
             summaryCard(
                 title: "Run State",
                 value: engine.state.displayName,
-                detail: "Wave \(engine.currentWave)/\(max(engine.totalWaves, 1)) • \(engine.elapsedFormatted)",
+                detail: "Wave \(engine.currentWave)/\(max(engine.totalWaves, 1)) \u{2022} \(engine.elapsedFormatted)",
                 symbol: engine.state.iconName,
                 tint: .cyan
             )
@@ -137,7 +183,7 @@ struct DashboardView: View {
             summaryCard(
                 title: "Results",
                 value: "\(engine.succeededCount) / \(engine.sessions.count)",
-                detail: "\(engine.failedCount) failed • \(engine.retryableCount) retryable",
+                detail: "\(engine.failedCount) failed \u{2022} \(engine.retryableCount) retryable",
                 symbol: "checkmark.circle.badge.xmark",
                 tint: engine.failedCount > 0 ? .orange : .green
             )
@@ -145,7 +191,7 @@ struct DashboardView: View {
             summaryCard(
                 title: "Background",
                 value: backgroundTimeLabel,
-                detail: "\(backgroundService.activeTaskCount) tasks • \(backgroundService.isBackgroundTimeLow ? "low time" : "stable")",
+                detail: "\(backgroundService.activeTaskCount) tasks \u{2022} \(backgroundService.isBackgroundTimeLow ? "low time" : "stable")",
                 symbol: "moon.zzz.fill",
                 tint: backgroundService.isBackgroundTimeLow ? .orange : .blue
             )
@@ -153,7 +199,7 @@ struct DashboardView: View {
             summaryCard(
                 title: "Recovery",
                 value: sessionRecovery.hasResumableCheckpoint() ? "Checkpoint" : "Clear",
-                detail: "\(String(format: "%.0f", sessionRecovery.recoverySuccessRate * 100))% success • \(String(format: "%.0f", engine.lastWaveFailureRate * 100))% last fail",
+                detail: "\(String(format: "%.0f", sessionRecovery.recoverySuccessRate * 100))% success \u{2022} \(String(format: "%.0f", engine.lastWaveFailureRate * 100))% last fail",
                 symbol: sessionRecovery.hasResumableCheckpoint() ? "arrow.clockwise.circle.fill" : "checkmark.seal.fill",
                 tint: sessionRecovery.hasResumableCheckpoint() ? .orange : .green
             )
@@ -167,7 +213,7 @@ struct DashboardView: View {
                     Text("Sessions")
                         .font(.headline)
                         .foregroundStyle(.white)
-                    Text("Proof screenshots are attached to every result and session detail.")
+                    Text("Swipe cards for quick actions. Tap for full proof.")
                         .font(.caption)
                         .foregroundStyle(.white.opacity(0.62))
                 }
@@ -177,25 +223,30 @@ struct DashboardView: View {
                     .foregroundStyle(.white.opacity(0.72))
             }
 
-            HStack(spacing: 8) {
-                ForEach(SessionVisibilityFilter.allCases, id: \.self) { filter in
-                    Button {
-                        sessionFilter = filter
-                    } label: {
-                        HStack(spacing: 6) {
-                            Text(filter.title)
-                            Text("\(count(for: filter))")
-                                .foregroundStyle(sessionFilter == filter ? .cyan : .white.opacity(0.55))
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(SessionVisibilityFilter.allCases, id: \.self) { filter in
+                        Button {
+                            sessionFilter = filter
+                        } label: {
+                            HStack(spacing: 5) {
+                                Image(systemName: filter.iconName)
+                                    .font(.system(size: 9))
+                                Text(filter.title)
+                                Text("\(count(for: filter))")
+                                    .foregroundStyle(sessionFilter == filter ? .cyan : .white.opacity(0.55))
+                            }
+                            .font(.caption.weight(.semibold))
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(sessionFilter == filter ? .white.opacity(0.16) : .white.opacity(0.06), in: .capsule)
                         }
-                        .font(.caption.weight(.semibold))
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 8)
-                        .background(sessionFilter == filter ? .white.opacity(0.16) : .white.opacity(0.06), in: .capsule)
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.white)
                     }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(.white)
                 }
             }
+            .contentMargins(.horizontal, 0)
 
             if filteredSessions.isEmpty {
                 ContentUnavailableView(
@@ -210,12 +261,7 @@ struct DashboardView: View {
             } else {
                 VStack(spacing: 10) {
                     ForEach(filteredSessions) { session in
-                        Button {
-                            selectedSession = session
-                        } label: {
-                            sessionCard(session)
-                        }
-                        .buttonStyle(.plain)
+                        sessionCard(session)
                     }
                 }
             }
@@ -358,20 +404,40 @@ struct DashboardView: View {
     private func sessionCard(_ session: ConcurrentSession) -> some View {
         VStack(spacing: 10) {
             HStack(alignment: .top) {
-                Image(systemName: session.phase.iconName)
-                    .font(.headline)
-                    .foregroundStyle(phaseColor(session.phase))
-                    .frame(width: 20)
+                ZStack {
+                    if let result = session.dualResult {
+                        Image(systemName: result.outcome.iconName)
+                            .font(.headline)
+                            .foregroundStyle(outcomeColor(result.outcome))
+                    } else {
+                        Image(systemName: session.phase.iconName)
+                            .font(.headline)
+                            .foregroundStyle(phaseColor(session.phase))
+                    }
+                }
+                .frame(width: 24)
 
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(session.credential.username)
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.white)
-                        .lineLimit(1)
+                    HStack(spacing: 6) {
+                        Text(session.credential.username)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.white)
+                            .lineLimit(1)
+                        if session.isFlaggedForReview {
+                            Image(systemName: "flag.fill")
+                                .font(.caption2)
+                                .foregroundStyle(.yellow)
+                        }
+                    }
 
                     HStack(spacing: 8) {
-                        Text(session.phase.displayName)
-                            .foregroundStyle(phaseColor(session.phase))
+                        if let result = session.dualResult {
+                            Text(result.outcome.shortName)
+                                .foregroundStyle(outcomeColor(result.outcome))
+                        } else {
+                            Text(session.phase.displayName)
+                                .foregroundStyle(phaseColor(session.phase))
+                        }
                         Text("Wave \(session.waveIndex + 1)")
                             .foregroundStyle(.white.opacity(0.52))
                         Text(session.proxyInfo)
@@ -430,9 +496,53 @@ struct DashboardView: View {
                     .font(.caption.weight(.bold))
                     .foregroundStyle(.white.opacity(0.38))
             }
+
+            if session.phase.isTerminal {
+                HStack(spacing: 12) {
+                    if session.phase == .failed {
+                        Button {
+                            engine.enqueueRetry(session.credential)
+                        } label: {
+                            Label("Retry", systemImage: "arrow.clockwise")
+                                .font(.caption.weight(.semibold))
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(.orange)
+                        .controlSize(.small)
+                    }
+
+                    Button {
+                        UIPasteboard.general.string = session.credential.username
+                    } label: {
+                        Label("Copy", systemImage: "doc.on.doc")
+                            .font(.caption.weight(.semibold))
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(.blue)
+                    .controlSize(.small)
+
+                    Button {
+                        session.toggleFlagged()
+                    } label: {
+                        Label(
+                            session.isFlaggedForReview ? "Unflag" : "Flag",
+                            systemImage: session.isFlaggedForReview ? "flag.slash.fill" : "flag.fill"
+                        )
+                        .font(.caption.weight(.semibold))
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(.yellow)
+                    .controlSize(.small)
+
+                    Spacer()
+                }
+            }
         }
         .padding(14)
         .background(.ultraThinMaterial, in: .rect(cornerRadius: 18))
+        .onTapGesture {
+            selectedSession = session
+        }
     }
 
     private func screenshotThumbnail(label: String, data: Data?, outcome: DualLoginOutcome?) -> some View {
@@ -481,10 +591,10 @@ struct DashboardView: View {
 
     private func outcomeBadge(_ title: String, outcome: DualLoginOutcome) -> some View {
         HStack(spacing: 5) {
-            Circle()
-                .fill(outcomeColor(outcome))
-                .frame(width: 6, height: 6)
-            Text("\(title): \(outcome.rawValue)")
+            Image(systemName: outcome.iconName)
+                .font(.system(size: 8))
+                .foregroundStyle(outcomeColor(outcome))
+            Text("\(title): \(outcome.shortName)")
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.white.opacity(0.72))
         }
@@ -516,10 +626,18 @@ struct DashboardView: View {
             base = engine.sessions
         case .active:
             base = engine.sessions.filter { $0.phase.isActive || $0.phase == .queued }
-        case .failed:
-            base = engine.sessions.filter { $0.phase == .failed }
-        case .succeeded:
-            base = engine.sessions.filter { $0.phase == .succeeded }
+        case .success:
+            base = engine.sessions.filter { $0.dualResult?.outcome == .success }
+        case .noAccount:
+            base = engine.sessions.filter { $0.dualResult?.outcome == .noAccount }
+        case .permDisabled:
+            base = engine.sessions.filter { $0.dualResult?.outcome == .permDisabled }
+        case .tempDisabled:
+            base = engine.sessions.filter { $0.dualResult?.outcome == .tempDisabled }
+        case .unsure:
+            base = engine.sessions.filter { $0.dualResult?.outcome == .unsure }
+        case .error:
+            base = engine.sessions.filter { $0.dualResult?.outcome == .error }
         }
 
         return base.sorted { lhs, rhs in
@@ -535,14 +653,14 @@ struct DashboardView: View {
 
     private func count(for filter: SessionVisibilityFilter) -> Int {
         switch filter {
-        case .all:
-            engine.sessions.count
-        case .active:
-            engine.sessions.filter { $0.phase.isActive || $0.phase == .queued }.count
-        case .failed:
-            engine.sessions.filter { $0.phase == .failed }.count
-        case .succeeded:
-            engine.sessions.filter { $0.phase == .succeeded }.count
+        case .all: engine.sessions.count
+        case .active: engine.sessions.filter { $0.phase.isActive || $0.phase == .queued }.count
+        case .success: engine.sessions.filter { $0.dualResult?.outcome == .success }.count
+        case .noAccount: engine.sessions.filter { $0.dualResult?.outcome == .noAccount }.count
+        case .permDisabled: engine.sessions.filter { $0.dualResult?.outcome == .permDisabled }.count
+        case .tempDisabled: engine.sessions.filter { $0.dualResult?.outcome == .tempDisabled }.count
+        case .unsure: engine.sessions.filter { $0.dualResult?.outcome == .unsure }.count
+        case .error: engine.sessions.filter { $0.dualResult?.outcome == .error }.count
         }
     }
 
@@ -593,11 +711,11 @@ struct DashboardView: View {
         guard let outcome else { return .gray }
         switch outcome {
         case .success: return .green
+        case .noAccount: return .indigo
         case .permDisabled: return .red
         case .tempDisabled: return .orange
-        case .networkError: return .yellow
-        case .crashed: return .red
         case .unsure: return .purple
+        case .error: return .yellow
         }
     }
 }

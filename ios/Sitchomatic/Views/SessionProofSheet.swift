@@ -16,6 +16,7 @@ struct SessionProofSheet: View {
                     if let error = session.errorMessage {
                         errorCard(error)
                     }
+                    actionBar
                     logTimeline
                 }
                 .padding()
@@ -28,18 +29,29 @@ struct SessionProofSheet: View {
         .presentationContentInteraction(.scrolls)
     }
 
-    // MARK: - Header
-
     private var sessionHeader: some View {
         VStack(spacing: 12) {
             HStack {
-                Image(systemName: session.phase.iconName)
-                    .font(.system(size: 28))
-                    .foregroundStyle(phaseColor)
+                if let result = session.dualResult {
+                    Image(systemName: result.outcome.iconName)
+                        .font(.system(size: 28))
+                        .foregroundStyle(outcomeColor(result.outcome))
+                } else {
+                    Image(systemName: session.phase.iconName)
+                        .font(.system(size: 28))
+                        .foregroundStyle(phaseColor)
+                }
 
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(session.credential.username)
-                        .font(.system(size: 16, weight: .bold, design: .monospaced))
+                    HStack(spacing: 6) {
+                        Text(session.credential.username)
+                            .font(.system(size: 16, weight: .bold, design: .monospaced))
+                        if session.isFlaggedForReview {
+                            Image(systemName: "flag.fill")
+                                .font(.caption)
+                                .foregroundStyle(.yellow)
+                        }
+                    }
                     Text(session.credential.displayName)
                         .font(.system(size: 12))
                         .foregroundStyle(.secondary)
@@ -48,9 +60,15 @@ struct SessionProofSheet: View {
                 Spacer()
 
                 VStack(alignment: .trailing, spacing: 2) {
-                    Text(session.phase.displayName.uppercased())
-                        .font(.system(size: 11, weight: .black, design: .monospaced))
-                        .foregroundStyle(phaseColor)
+                    if let result = session.dualResult {
+                        Text(result.outcome.shortName.uppercased())
+                            .font(.system(size: 11, weight: .black, design: .monospaced))
+                            .foregroundStyle(outcomeColor(result.outcome))
+                    } else {
+                        Text(session.phase.displayName.uppercased())
+                            .font(.system(size: 11, weight: .black, design: .monospaced))
+                            .foregroundStyle(phaseColor)
+                    }
                     Text(session.elapsedFormatted)
                         .font(.system(size: 13, weight: .semibold, design: .monospaced))
                         .foregroundStyle(.secondary)
@@ -93,8 +111,6 @@ struct SessionProofSheet: View {
         .background(Color(.tertiarySystemFill))
         .clipShape(.capsule)
     }
-
-    // MARK: - Screenshot Proof
 
     private var screenshotProofSection: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -151,15 +167,15 @@ struct SessionProofSheet: View {
 
             HStack(spacing: 4) {
                 if let outcome {
-                    Circle()
-                        .fill(outcomeColor(outcome))
-                        .frame(width: 6, height: 6)
+                    Image(systemName: outcome.iconName)
+                        .font(.system(size: 8))
+                        .foregroundStyle(outcomeColor(outcome))
                 }
                 Text(title)
                     .font(.system(size: 10, weight: .bold, design: .monospaced))
                 Spacer()
                 if let outcome {
-                    Text(outcome.rawValue)
+                    Text(outcome.shortName)
                         .font(.system(size: 9, weight: .semibold, design: .monospaced))
                         .foregroundStyle(outcomeColor(outcome))
                 }
@@ -172,8 +188,6 @@ struct SessionProofSheet: View {
         .frame(maxWidth: .infinity)
     }
 
-    // MARK: - Dual Result Breakdown
-
     private func dualResultBreakdown(_ result: DualLoginResult) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
@@ -185,11 +199,11 @@ struct SessionProofSheet: View {
             }
 
             VStack(spacing: 8) {
-                resultRow("Combined", value: result.outcome.rawValue, color: outcomeColor(result.outcome))
-                resultRow("Joe Fortune", value: result.joeOutcome.rawValue, color: outcomeColor(result.joeOutcome))
-                resultRow("Ignition", value: result.ignitionOutcome.rawValue, color: outcomeColor(result.ignitionOutcome))
-                resultRow("Duration", value: String(format: "%.2fs", result.duration), color: .secondary)
-                resultRow("Proxy", value: result.proxyUsed, color: .secondary)
+                resultRow("Combined", value: result.outcome.longName, icon: result.outcome.iconName, color: outcomeColor(result.outcome))
+                resultRow("Joe Fortune", value: result.joeOutcome.longName, icon: result.joeOutcome.iconName, color: outcomeColor(result.joeOutcome))
+                resultRow("Ignition", value: result.ignitionOutcome.longName, icon: result.ignitionOutcome.iconName, color: outcomeColor(result.ignitionOutcome))
+                resultRow("Duration", value: String(format: "%.2fs", result.duration), icon: "clock", color: .secondary)
+                resultRow("Proxy", value: result.proxyUsed, icon: "network", color: .secondary)
             }
             .padding()
             .background(Color(.secondarySystemGroupedBackground))
@@ -197,19 +211,22 @@ struct SessionProofSheet: View {
         }
     }
 
-    private func resultRow(_ label: String, value: String, color: Color) -> some View {
+    private func resultRow(_ label: String, value: String, icon: String, color: Color) -> some View {
         HStack {
             Text(label)
                 .font(.system(size: 12))
                 .foregroundStyle(.secondary)
             Spacer()
-            Text(value)
-                .font(.system(size: 12, weight: .semibold, design: .monospaced))
-                .foregroundStyle(color)
+            HStack(spacing: 4) {
+                Image(systemName: icon)
+                    .font(.system(size: 9))
+                    .foregroundStyle(color)
+                Text(value)
+                    .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(color)
+            }
         }
     }
-
-    // MARK: - Error Card
 
     private func errorCard(_ error: String) -> some View {
         HStack(spacing: 8) {
@@ -225,7 +242,46 @@ struct SessionProofSheet: View {
         .clipShape(.rect(cornerRadius: 12))
     }
 
-    // MARK: - Log Timeline
+    private var actionBar: some View {
+        HStack(spacing: 12) {
+            if session.phase == .failed {
+                Button {
+                    ConcurrentAutomationEngine.shared.enqueueRetry(session.credential)
+                } label: {
+                    Label("Retry", systemImage: "arrow.clockwise")
+                        .font(.caption.weight(.semibold))
+                }
+                .buttonStyle(.bordered)
+                .tint(.orange)
+                .controlSize(.small)
+            }
+
+            Button {
+                UIPasteboard.general.string = session.credential.username
+            } label: {
+                Label("Copy", systemImage: "doc.on.doc")
+                    .font(.caption.weight(.semibold))
+            }
+            .buttonStyle(.bordered)
+            .tint(.blue)
+            .controlSize(.small)
+
+            Button {
+                session.toggleFlagged()
+            } label: {
+                Label(
+                    session.isFlaggedForReview ? "Unflag" : "Flag",
+                    systemImage: session.isFlaggedForReview ? "flag.slash.fill" : "flag.fill"
+                )
+                .font(.caption.weight(.semibold))
+            }
+            .buttonStyle(.bordered)
+            .tint(.yellow)
+            .controlSize(.small)
+
+            Spacer()
+        }
+    }
 
     private var logTimeline: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -268,8 +324,6 @@ struct SessionProofSheet: View {
         }
     }
 
-    // MARK: - Helpers
-
     private var phaseColor: Color {
         switch session.phase {
         case .succeeded: .green
@@ -283,11 +337,11 @@ struct SessionProofSheet: View {
     private func outcomeColor(_ outcome: DualLoginOutcome) -> Color {
         switch outcome {
         case .success: .green
+        case .noAccount: .indigo
         case .permDisabled: .red
         case .tempDisabled: .orange
-        case .networkError: .yellow
-        case .crashed: .red
         case .unsure: .purple
+        case .error: .yellow
         }
     }
 

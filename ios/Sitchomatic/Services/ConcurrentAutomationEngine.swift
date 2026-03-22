@@ -71,9 +71,26 @@ final class ConcurrentAutomationEngine {
     private let fileStorage = PersistentFileStorageService.shared
     private let persistence = PersistenceService.shared
     private let logger = DebugLogger.shared
+    private let haptics = HapticService.shared
 
     var succeededCount: Int { sessions.filter { $0.phase == .succeeded }.count }
     var failedCount: Int { sessions.filter { $0.phase == .failed }.count }
+
+    var noAccountCount: Int {
+        sessions.filter { $0.dualResult?.outcome == .noAccount }.count
+    }
+    var permDisabledCount: Int {
+        sessions.filter { $0.dualResult?.outcome == .permDisabled }.count
+    }
+    var tempDisabledCount: Int {
+        sessions.filter { $0.dualResult?.outcome == .tempDisabled }.count
+    }
+    var unsureCount: Int {
+        sessions.filter { $0.dualResult?.outcome == .unsure }.count
+    }
+    var errorCount: Int {
+        sessions.filter { $0.dualResult?.outcome == .error }.count
+    }
     var cancelledCount: Int { sessions.filter { $0.phase == .cancelled }.count }
     var activeCount: Int { sessions.filter { $0.phase.isActive }.count }
     var queuedCount: Int { sessions.filter { $0.phase == .queued }.count }
@@ -233,6 +250,7 @@ final class ConcurrentAutomationEngine {
         }
 
         log(.phase, "Dual run starting — \(enabledCredentials.count) credentials, \(concurrency) concurrent pairs, \(totalWaves) waves, health: \(String(format: "%.0f", healthScore * 100))%")
+        haptics.runStart()
 
         sessionRecovery.saveCheckpoint(credentialIndex: 0, waveIndex: 0, phase: "starting")
         crashProtection.startMonitoring()
@@ -341,7 +359,12 @@ final class ConcurrentAutomationEngine {
         sessionRecovery.clearCheckpoint()
         crashProtection.stopMonitoring()
         lifetimeBudget.reset()
-        log(.result, "Engine stopped — \(succeededCount) succeeded, \(failedCount) failed, \(cancelledCount) cancelled")
+        log(.result, "Engine stopped — \(succeededCount) success, \(failedCount) failed, \(cancelledCount) cancelled")
+    }
+
+    func enqueueRetry(_ credential: LoginCredential) {
+        retryQueue.append(credential)
+        log(.phase, "Manually enqueued retry for \(credential.displayName)")
     }
 
     func reset() {
@@ -375,6 +398,7 @@ final class ConcurrentAutomationEngine {
                     self.isAutoPaused = true
                     self.isPauseRequested = true
                     self.state = .paused
+                    self.haptics.autoPauseWarning()
                     self.log(.error, "AUTO-PAUSE: Memory emergency (\(String(format: "%.0f", self.crashProtection.currentMemoryUsageMB))MB) — pausing engine")
                     self.pool.handleMemoryPressure()
                 }
@@ -486,6 +510,7 @@ final class ConcurrentAutomationEngine {
             let waveFailed = waveSessions.filter { $0.phase == .failed }.count
             lastWaveFailureRate = waveSessions.isEmpty ? 0 : Double(waveFailed) / Double(waveSessions.count)
             log(.result, "Wave \(waveIdx + 1) complete — \(waveSucceeded) succeeded, \(waveFailed) failed (health: \(String(format: "%.0f", healthScore * 100))%)")
+            haptics.waveComplete()
 
             let retryableSessions = waveSessions.filter { session in
                 guard let result = session.dualResult else { return false }
@@ -516,7 +541,8 @@ final class ConcurrentAutomationEngine {
             sessionRecovery.clearCheckpoint()
             crashProtection.stopMonitoring()
             memoryWatchTask?.cancel()
-            log(.result, "Run complete — \(succeededCount)/\(sessions.count) succeeded, \(failedCount) failed, \(retryQueue.count) retryable, health: \(String(format: "%.0f", healthScore * 100))%")
+            haptics.engineCompleted()
+            log(.result, "Run complete — \(succeededCount) success, \(noAccountCount) no acc, \(permDisabledCount) perm, \(tempDisabledCount) temp, \(unsureCount) unsure, \(errorCount) error | health: \(String(format: "%.0f", healthScore * 100))%")
         }
 
         backgroundService.endBackgroundTask(identifier: "sitchomatic.engine")
@@ -591,46 +617,59 @@ final class ConcurrentAutomationEngine {
                 lifetimeBudget.recordDestruction()
                 lifetimeBudget.recordDestruction()
                 crashRecovery.recordRecoverySuccess(pageID: session.credential.id.uuidString)
-                session.log(.result, "Dual result: SUCCESS (joe: \(result.joeOutcome.rawValue), ignition: \(result.ignitionOutcome.rawValue), \(String(format: "%.1f", result.duration))s)")
+                haptics.credentialSuccess()
+                session.log(.result, "\(result.outcome.longName) (joe: \(result.joeOutcome.shortName), ignition: \(result.ignitionOutcome.shortName), \(String(format: "%.1f", result.duration))s)")
+                updateCredentialResult(session.credential, outcome: result)
+                return
+
+            case .noAccount:
+                session.setError(result.errorMessage ?? "No account found")
+                session.updatePhase(.failed)
+                lifetimeBudget.recordDestruction()
+                lifetimeBudget.recordDestruction()
+                haptics.credentialFailure()
+                session.log(.result, "\(result.outcome.longName) — no retry")
                 updateCredentialResult(session.credential, outcome: result)
                 return
 
             case .permDisabled:
-                session.setError(result.errorMessage ?? "Permanent disable")
+                session.setError(result.errorMessage ?? "Permanently disabled")
                 session.updatePhase(.failed)
                 lifetimeBudget.recordDestruction()
                 lifetimeBudget.recordDestruction()
-                session.log(.result, "Dual result: PERM DISABLED — no retry")
+                haptics.credentialFailure()
+                session.log(.result, "\(result.outcome.longName) — no retry")
                 updateCredentialResult(session.credential, outcome: result)
                 return
 
-            case .tempDisabled, .networkError, .crashed:
+            case .tempDisabled, .error:
                 if attempt >= maxAttempts {
-                    session.setError(result.errorMessage ?? result.outcome.rawValue)
+                    session.setError(result.errorMessage ?? result.outcome.shortName)
                     session.updatePhase(.failed)
                     lifetimeBudget.recordDestruction()
                     lifetimeBudget.recordDestruction()
-                    session.log(.result, "Dual result: \(result.outcome.rawValue) — max retries exhausted")
+                    session.log(.result, "\(result.outcome.longName) — max retries exhausted")
                     crashRecovery.recordRecoveryFailure(pageID: session.credential.id.uuidString)
                     updateCredentialResult(session.credential, outcome: result)
                     return
                 }
 
-                if result.outcome == .crashed {
+                if result.outcome == .error {
                     crashRecovery.recordRecovery(pageID: session.credential.id.uuidString, phase: "paired-session")
                     crashProtection.recordCrash()
                     pool.reportProcessTermination()
                 }
 
-                session.log(.phase, "Attempt \(attempt) failed: \(result.outcome.rawValue) — will retry")
+                session.log(.phase, "Attempt \(attempt): \(result.outcome.shortName) — will retry")
                 continue
 
             case .unsure:
-                session.setError(result.errorMessage ?? "Mixed/unsure results")
+                session.setError(result.errorMessage ?? "Needs review")
                 session.updatePhase(.failed)
                 lifetimeBudget.recordDestruction()
                 lifetimeBudget.recordDestruction()
-                session.log(.result, "Dual result: UNSURE — joe: \(result.joeOutcome.rawValue), ignition: \(result.ignitionOutcome.rawValue)")
+                haptics.credentialFailure()
+                session.log(.result, "\(result.outcome.longName) — joe: \(result.joeOutcome.shortName), ignition: \(result.ignitionOutcome.shortName)")
                 updateCredentialResult(session.credential, outcome: result)
                 return
             }
@@ -676,7 +715,7 @@ final class ConcurrentAutomationEngine {
     private func persistWaveResults(_ waveSessions: [ConcurrentSession]) {
         for session in waveSessions where session.phase.isTerminal {
             if let result = session.dualResult {
-                let summary = "\(session.credential.displayName): \(result.outcome.rawValue) (joe: \(result.joeOutcome.rawValue), ign: \(result.ignitionOutcome.rawValue), \(String(format: "%.1f", result.duration))s)"
+                let summary = "\(session.credential.displayName): \(result.outcome.shortName) (joe: \(result.joeOutcome.shortName), ign: \(result.ignitionOutcome.shortName), \(String(format: "%.1f", result.duration))s)"
                 fileStorage.save(text: summary, filename: "results/wave-\(session.waveIndex)/\(session.credential.id.uuidString).txt")
             }
         }

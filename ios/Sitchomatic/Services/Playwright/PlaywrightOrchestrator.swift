@@ -9,20 +9,53 @@ nonisolated struct PairedPageResult: Sendable {
     let sharedProxyEndpoint: String
 }
 
-nonisolated enum DualLoginOutcome: String, Sendable {
+nonisolated enum DualLoginOutcome: String, Sendable, CaseIterable {
     case success
+    case noAccount
     case permDisabled
     case tempDisabled
     case unsure
-    case networkError
-    case crashed
+    case error
+
+    var shortName: String {
+        switch self {
+        case .success: "Success"
+        case .noAccount: "No ACC"
+        case .permDisabled: "Perm Disabled"
+        case .tempDisabled: "Temp Disabled"
+        case .unsure: "Needs Review"
+        case .error: "Error Found"
+        }
+    }
+
+    var longName: String {
+        switch self {
+        case .success: "Successful Login"
+        case .noAccount: "No Account Result"
+        case .permDisabled: "Permanently Disabled"
+        case .tempDisabled: "Temporarily Disabled"
+        case .unsure: "Unsure / Needs Review"
+        case .error: "N/A — Error Found"
+        }
+    }
+
+    var iconName: String {
+        switch self {
+        case .success: "checkmark.seal.fill"
+        case .noAccount: "person.slash.fill"
+        case .permDisabled: "lock.slash.fill"
+        case .tempDisabled: "clock.badge.exclamationmark.fill"
+        case .unsure: "questionmark.diamond.fill"
+        case .error: "exclamationmark.octagon.fill"
+        }
+    }
 
     var isTerminal: Bool {
-        self == .permDisabled
+        self == .permDisabled || self == .noAccount
     }
 
     var shouldRetry: Bool {
-        self == .tempDisabled || self == .networkError || self == .crashed
+        self == .tempDisabled || self == .error
     }
 }
 
@@ -57,21 +90,21 @@ nonisolated struct DualLoginResult: Sendable {
         case (.success, .success):
             combined = .success
             errorMsg = nil
+        case (.noAccount, _), (_, .noAccount):
+            combined = .noAccount
+            errorMsg = "No account found on one or both sites"
         case (.permDisabled, _), (_, .permDisabled):
             combined = .permDisabled
-            errorMsg = "Permanent disable detected"
+            errorMsg = "Permanently disabled detected"
         case (.tempDisabled, _), (_, .tempDisabled):
             combined = .tempDisabled
-            errorMsg = "Temporary disable detected"
-        case (.crashed, _), (_, .crashed):
-            combined = .crashed
-            errorMsg = "WebView crash during login"
-        case (.networkError, _), (_, .networkError):
-            combined = .networkError
-            errorMsg = "Network error during login"
+            errorMsg = "Temporarily disabled detected"
+        case (.error, _), (_, .error):
+            combined = .error
+            errorMsg = "Error during login attempt"
         default:
             combined = .unsure
-            errorMsg = "Mixed results — joe: \(joeOutcome.rawValue), ignition: \(ignitionOutcome.rawValue)"
+            errorMsg = "Mixed results — joe: \(joeOutcome.shortName), ignition: \(ignitionOutcome.shortName)"
         }
 
         return DualLoginResult(
@@ -461,9 +494,9 @@ final class PlaywrightOrchestrator {
             log(.error, "Failed to create paired pages: \(error.localizedDescription)")
             return DualLoginResult(
                 credential: credential,
-                outcome: .networkError,
-                joeOutcome: .networkError,
-                ignitionOutcome: .networkError,
+                outcome: .error,
+                joeOutcome: .error,
+                ignitionOutcome: .error,
                 joeScreenshot: nil,
                 ignitionScreenshot: nil,
                 joeTrace: [],
@@ -484,7 +517,7 @@ final class PlaywrightOrchestrator {
                 do {
                     joeOutcome = try await joeFlow(pair.joePage, credential, speed)
                 } catch is CancellationError {
-                    joeOutcome = .crashed
+                    joeOutcome = .error
                 } catch {
                     joeOutcome = .unsure
                     self.log(.error, "Joe flow error: \(error.localizedDescription)")
@@ -495,7 +528,7 @@ final class PlaywrightOrchestrator {
                 do {
                     ignitionOutcome = try await ignitionFlow(pair.ignitionPage, credential, speed)
                 } catch is CancellationError {
-                    ignitionOutcome = .crashed
+                    ignitionOutcome = .error
                 } catch {
                     ignitionOutcome = .unsure
                     self.log(.error, "Ignition flow error: \(error.localizedDescription)")

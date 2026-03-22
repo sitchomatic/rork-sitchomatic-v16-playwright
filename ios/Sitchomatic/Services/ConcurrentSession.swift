@@ -62,6 +62,7 @@ final class ConcurrentSession: Identifiable {
     private(set) var logEntries: [SessionLogLine] = []
     private(set) var dualResult: DualLoginResult?
     private(set) var retryCount: Int = 0
+    private(set) var isFlaggedForReview: Bool = false
 
     var elapsedTime: TimeInterval {
         guard let start = startTime else { return 0 }
@@ -100,6 +101,7 @@ final class ConcurrentSession: Identifiable {
     func setIgnitionScreenshot(_ data: Data) { ignitionScreenshot = data }
     func setDualResult(_ result: DualLoginResult) { dualResult = result }
     func incrementRetry() { retryCount += 1 }
+    func toggleFlagged() { isFlaggedForReview.toggle() }
 
     func log(_ category: SessionLogLine.Category, _ message: String) {
         logEntries.append(SessionLogLine(timestamp: Date(), category: category, message: message))
