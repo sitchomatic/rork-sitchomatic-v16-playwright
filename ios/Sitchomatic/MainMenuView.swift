@@ -1,8 +1,6 @@
 import SwiftUI
 
 struct MainMenuView: View {
-    let onLogout: () -> Void
-
     @State private var selectedTab: AppTab = .dashboard
     @State private var logger = DebugLogger.shared
 
@@ -54,7 +52,7 @@ struct MainMenuView: View {
 
                 Tab("Settings", systemImage: "gearshape.fill", value: AppTab.settings) {
                     NavigationStack {
-                        SettingsView(onLogout: onLogout)
+                        SettingsView()
                     }
                 }
             }

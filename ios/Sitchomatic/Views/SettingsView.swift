@@ -1,8 +1,6 @@
 import SwiftUI
 
 struct SettingsView: View {
-    let onLogout: () -> Void
-
     @State private var settings = AutomationSettings.shared
     @State private var networkManager = SimpleNetworkManager.shared
     @State private var showClearConfirm: Bool = false
@@ -152,12 +150,6 @@ struct SettingsView: View {
 
                 Button("Clear All Data", role: .destructive) {
                     showClearConfirm = true
-                }
-            }
-
-            Section {
-                Button("Logout", role: .destructive) {
-                    onLogout()
                 }
             }
 
