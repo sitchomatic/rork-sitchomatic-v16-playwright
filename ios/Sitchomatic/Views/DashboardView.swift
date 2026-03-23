@@ -21,41 +21,24 @@ struct DashboardView: View {
     }
 
     var body: some View {
-        ZStack {
-            Image("MainMenuWallpaper")
-                .resizable()
-                .aspectRatio(contentMode: .fill)
-                .ignoresSafeArea()
-                .allowsHitTesting(false)
-
-            LinearGradient(
-                stops: [
-                    .init(color: .black.opacity(0.2), location: 0),
-                    .init(color: .black.opacity(0.46), location: 0.28),
-                    .init(color: .black.opacity(0.88), location: 1)
-                ],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-            .ignoresSafeArea()
-            .allowsHitTesting(false)
-
-            ScrollView {
-                VStack(spacing: 18) {
-                    heroCard
-                    categoryBreakdown
-                    overviewGrid
-                    sessionSection
-                    toolsSection
-                    healthSection
-                }
-                .padding(.horizontal, 16)
-                .padding(.top, 12)
-                .padding(.bottom, 24)
+        ScrollView {
+            VStack(spacing: 16) {
+                pairsStatusHeader
+                healthAndStatsSection
+                quickActionRow
+                categoryGaugesSection
+                systemHealthRow
+                toolsSection
+                sessionFeedSection
             }
+            .padding(.horizontal, 16)
+            .padding(.top, 8)
+            .padding(.bottom, 24)
         }
+        .background(NeonTheme.trueBlack)
         .navigationTitle("Sitchomatic v16")
-        .navigationBarTitleDisplayMode(.large)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbarBackground(NeonTheme.trueBlack, for: .navigationBar)
         .toolbarColorScheme(.dark, for: .navigationBar)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
@@ -78,19 +61,44 @@ struct DashboardView: View {
         }
     }
 
-    private var heroCard: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(alignment: .top, spacing: 12) {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Permanent Dual Mode")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.cyan)
-                    Text("Run sessions, inspect proof, and jump straight into tools.")
-                        .font(.title3.weight(.bold))
-                        .foregroundStyle(.white)
-                    Text("Shared proxy pairs, Playwright proof screenshots, live recovery, and trace-ready diagnostics.")
-                        .font(.footnote)
-                        .foregroundStyle(.white.opacity(0.72))
+    // MARK: - Pairs Status Header
+
+    private var pairsStatusHeader: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Pairs Status")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(NeonTheme.textTertiary)
+
+                    HStack(alignment: .firstTextBaseline, spacing: 2) {
+                        Text("\(engine.succeededCount)")
+                            .font(.system(size: 32, weight: .bold, design: .monospaced))
+                            .foregroundStyle(NeonTheme.neonGreen)
+                            .neonGlow(NeonTheme.neonGreen, radius: 4)
+                        Text("/\(engine.sessions.count)")
+                            .font(.system(size: 18, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(NeonTheme.textSecondary)
+                    }
+
+                    HStack(spacing: 6) {
+                        if engine.isRunning {
+                            Circle()
+                                .fill(NeonTheme.neonGreen)
+                                .frame(width: 6, height: 6)
+                                .neonGlow(NeonTheme.neonGreen, radius: 3)
+                            Text("Processing")
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(NeonTheme.neonGreen)
+                        } else {
+                            Circle()
+                                .fill(NeonTheme.textTertiary)
+                                .frame(width: 6, height: 6)
+                            Text(engine.state.displayName)
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(NeonTheme.textTertiary)
+                        }
+                    }
                 }
 
                 Spacer()
@@ -98,526 +106,396 @@ struct DashboardView: View {
                 Button {
                     selectedTab = .run
                 } label: {
-                    Label("Run", systemImage: "bolt.horizontal.fill")
-                        .font(.headline)
-                        .padding(.horizontal, 14)
+                    Text("Run")
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundStyle(.black)
+                        .padding(.horizontal, 24)
                         .padding(.vertical, 10)
+                        .background(NeonTheme.neonGreen, in: .capsule)
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(.cyan)
+                .neonGlow(NeonTheme.neonGreen, radius: 6)
             }
 
-            HStack(spacing: 10) {
-                statusPill(title: "Credentials", value: "\(enabledCredentialCount)", symbol: "person.2.fill", tint: .white)
-                statusPill(title: "Pairs", value: "\(orchestrator.activePairedSessions)", symbol: "link", tint: .cyan)
-                statusPill(title: "Health", value: healthPercentText, symbol: "heart.fill", tint: healthColor)
-            }
-
-            HStack(spacing: 10) {
-                quickSwitchButton(title: "Sessions", symbol: "rectangle.stack.fill", tab: .run)
-                quickSwitchButton(title: "Credentials", symbol: "person.crop.circle.badge.plus", tab: .credentials)
-                quickSwitchButton(title: "Debug", symbol: "waveform.path.ecg.rectangle", tab: .debug)
-            }
+            NeonProgressBar(
+                progress: engine.sessions.isEmpty ? 0 : engine.overallProgress,
+                height: 4
+            )
         }
-        .padding(18)
-        .background(.ultraThinMaterial, in: .rect(cornerRadius: 22))
+        .padding(16)
+        .background(
+            RoundedRectangle(cornerRadius: 16)
+                .fill(NeonTheme.cardBackground)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16)
+                        .stroke(NeonTheme.neonGreen.opacity(engine.isRunning ? 0.2 : 0.06), lineWidth: 0.5)
+                )
+        )
     }
 
-    private var categoryBreakdown: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Result Categories")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.white.opacity(0.62))
+    // MARK: - Health Ring + Stats Grid
 
-            let columns: [GridItem] = [
-                GridItem(.flexible(), spacing: 8),
-                GridItem(.flexible(), spacing: 8),
-                GridItem(.flexible(), spacing: 8)
-            ]
+    private var healthAndStatsSection: some View {
+        HStack(alignment: .top, spacing: 12) {
+            VStack(spacing: 6) {
+                statTile(value: "\(engine.succeededCount)", label: "Success", color: NeonTheme.neonGreen)
+                statTile(value: "\(engine.failedCount)", label: "Failed", color: NeonTheme.neonRed)
+                statTile(value: "\(engine.activeCount)", label: "Active", color: NeonTheme.neonCyan)
+            }
 
-            LazyVGrid(columns: columns, spacing: 8) {
-                categoryChip(outcome: .success, count: engine.succeededCount)
-                categoryChip(outcome: .noAccount, count: engine.noAccountCount)
-                categoryChip(outcome: .permDisabled, count: engine.permDisabledCount)
-                categoryChip(outcome: .tempDisabled, count: engine.tempDisabledCount)
-                categoryChip(outcome: .unsure, count: engine.unsureCount)
-                categoryChip(outcome: .error, count: engine.errorCount)
+            HealthRingView(
+                progress: engine.healthScore,
+                label: "\(Int(engine.healthScore * 100))%",
+                stateLabel: engine.isRunning ? "Active" : engine.state.displayName,
+                size: 130
+            )
+
+            VStack(spacing: 6) {
+                statTile(value: "\(engine.queuedCount)", label: "Queued", color: NeonTheme.textTertiary)
+                statTile(value: "\(enabledCredentialCount)", label: "Creds", color: NeonTheme.textPrimary)
+                statTile(value: "\(engine.effectiveConcurrency)", label: "Pairs", color: NeonTheme.neonCyan)
             }
         }
         .padding(14)
-        .background(.ultraThinMaterial, in: .rect(cornerRadius: 18))
-    }
-
-    private func categoryChip(outcome: DualLoginOutcome, count: Int) -> some View {
-        HStack(spacing: 6) {
-            Image(systemName: outcome.iconName)
-                .font(.caption2)
-                .foregroundStyle(outcomeColor(outcome))
-            VStack(alignment: .leading, spacing: 1) {
-                Text(outcome.shortName)
-                    .font(.system(size: 9, weight: .bold, design: .monospaced))
-                    .foregroundStyle(.white.opacity(0.8))
-                Text("\(count)")
-                    .font(.caption.weight(.heavy))
-                    .foregroundStyle(outcomeColor(outcome))
-            }
-            Spacer()
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
-        .background(outcomeColor(outcome).opacity(0.12), in: .rect(cornerRadius: 10))
-    }
-
-    private var overviewGrid: some View {
-        let columns: [GridItem] = [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)]
-
-        return LazyVGrid(columns: columns, spacing: 12) {
-            summaryCard(
-                title: "Run State",
-                value: engine.state.displayName,
-                detail: "Wave \(engine.currentWave)/\(max(engine.totalWaves, 1)) \u{2022} \(engine.elapsedFormatted)",
-                symbol: engine.state.iconName,
-                tint: .cyan
-            )
-
-            summaryCard(
-                title: "Results",
-                value: "\(engine.succeededCount) / \(engine.sessions.count)",
-                detail: "\(engine.failedCount) failed \u{2022} \(engine.retryableCount) retryable",
-                symbol: "checkmark.circle.badge.xmark",
-                tint: engine.failedCount > 0 ? .orange : .green
-            )
-
-            summaryCard(
-                title: "Background",
-                value: backgroundTimeLabel,
-                detail: "\(backgroundService.activeTaskCount) tasks \u{2022} \(backgroundService.isBackgroundTimeLow ? "low time" : "stable")",
-                symbol: "moon.zzz.fill",
-                tint: backgroundService.isBackgroundTimeLow ? .orange : .blue
-            )
-
-            summaryCard(
-                title: "Recovery",
-                value: sessionRecovery.hasResumableCheckpoint() ? "Checkpoint" : "Clear",
-                detail: "\(String(format: "%.0f", sessionRecovery.recoverySuccessRate * 100))% success \u{2022} \(String(format: "%.0f", engine.lastWaveFailureRate * 100))% last fail",
-                symbol: sessionRecovery.hasResumableCheckpoint() ? "arrow.clockwise.circle.fill" : "checkmark.seal.fill",
-                tint: sessionRecovery.hasResumableCheckpoint() ? .orange : .green
-            )
-        }
-    }
-
-    private var sessionSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .firstTextBaseline) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Sessions")
-                        .font(.headline)
-                        .foregroundStyle(.white)
-                    Text("Swipe cards for quick actions. Tap for full proof.")
-                        .font(.caption)
-                        .foregroundStyle(.white.opacity(0.62))
-                }
-                Spacer()
-                Text("\(filteredSessions.count) shown")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.white.opacity(0.72))
-            }
-
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    ForEach(SessionVisibilityFilter.allCases, id: \.self) { filter in
-                        Button {
-                            sessionFilter = filter
-                        } label: {
-                            HStack(spacing: 5) {
-                                Image(systemName: filter.iconName)
-                                    .font(.system(size: 9))
-                                Text(filter.title)
-                                Text("\(count(for: filter))")
-                                    .foregroundStyle(sessionFilter == filter ? .cyan : .white.opacity(0.55))
-                            }
-                            .font(.caption.weight(.semibold))
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 8)
-                            .background(sessionFilter == filter ? .white.opacity(0.16) : .white.opacity(0.06), in: .capsule)
-                        }
-                        .buttonStyle(.plain)
-                        .foregroundStyle(.white)
-                    }
-                }
-            }
-            .contentMargins(.horizontal, 0)
-
-            if filteredSessions.isEmpty {
-                ContentUnavailableView(
-                    "No Sessions",
-                    systemImage: "rectangle.stack.badge.play",
-                    description: Text("Start a dual run to see live progress, proof screenshots, and outcome breakdowns here.")
+        .background(
+            RoundedRectangle(cornerRadius: 16)
+                .fill(NeonTheme.cardBackground)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16)
+                        .stroke(NeonTheme.cardBorder, lineWidth: 0.5)
                 )
-                .foregroundStyle(.white)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 16)
-                .background(.ultraThinMaterial, in: .rect(cornerRadius: 20))
-            } else {
-                VStack(spacing: 10) {
-                    ForEach(filteredSessions) { session in
-                        sessionCard(session)
+        )
+    }
+
+    private func statTile(value: String, label: String, color: Color) -> some View {
+        VStack(spacing: 2) {
+            Text(value)
+                .font(.system(size: 16, weight: .bold, design: .monospaced))
+                .foregroundStyle(color)
+            Text(label)
+                .font(.system(size: 8, weight: .semibold))
+                .foregroundStyle(NeonTheme.textTertiary)
+        }
+        .frame(width: 56, height: 44)
+        .background(Color.white.opacity(0.03), in: .rect(cornerRadius: 8))
+    }
+
+    // MARK: - Quick Action Row
+
+    private var quickActionRow: some View {
+        HStack(spacing: 10) {
+            quickActionButton(
+                title: "Credentials",
+                symbol: "person.badge.key.fill",
+                tint: NeonTheme.neonCyan,
+                badge: enabledCredentialCount
+            ) { selectedTab = .credentials }
+
+            quickActionButton(
+                title: "Pairs",
+                symbol: "link",
+                tint: NeonTheme.neonGreen,
+                badge: orchestrator.activePairedSessions
+            ) { selectedTab = .run }
+
+            quickActionButton(
+                title: "Health",
+                symbol: "heart.fill",
+                tint: NeonTheme.healthColor(engine.healthScore),
+                badge: 0
+            ) { selectedTab = .debug }
+
+            quickActionButton(
+                title: "Sessions",
+                symbol: "antenna.radiowaves.left.and.right",
+                tint: NeonTheme.neonPurple,
+                badge: engine.activeCount
+            ) { selectedTab = .run }
+        }
+    }
+
+    private func quickActionButton(title: String, symbol: String, tint: Color, badge: Int, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            VStack(spacing: 6) {
+                ZStack(alignment: .topTrailing) {
+                    Image(systemName: symbol)
+                        .font(.system(size: 20))
+                        .foregroundStyle(tint)
+                        .frame(width: 44, height: 44)
+                        .background(tint.opacity(0.12), in: .rect(cornerRadius: 12))
+
+                    if badge > 0 {
+                        Text("\(badge)")
+                            .font(.system(size: 8, weight: .bold, design: .monospaced))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 2)
+                            .background(tint, in: .capsule)
+                            .offset(x: 4, y: -4)
                     }
                 }
+                Text(title)
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(NeonTheme.textSecondary)
             }
+            .frame(maxWidth: .infinity)
         }
+        .buttonStyle(.plain)
     }
 
-    private var toolsSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text("Tools")
-                    .font(.headline)
-                    .foregroundStyle(.white)
-                Spacer()
-                Text(orchestrator.networkStatusSummary)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.white.opacity(0.68))
+    // MARK: - Category Gauges
+
+    private var categoryGaugesSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 0) {
+                GaugeIndicatorView(value: Double(engine.succeededCount), maxValue: max(Double(engine.sessions.count), 1), label: "Success", count: "\(engine.succeededCount)", color: NeonTheme.neonGreen)
+                    .frame(maxWidth: .infinity)
+                GaugeIndicatorView(value: Double(engine.failedCount), maxValue: max(Double(engine.sessions.count), 1), label: "Failed", count: "\(engine.failedCount)", color: NeonTheme.neonRed)
+                    .frame(maxWidth: .infinity)
+                GaugeIndicatorView(value: Double(engine.activeCount), maxValue: max(Double(engine.sessions.count), 1), label: "Active", count: "\(engine.activeCount)", color: NeonTheme.neonCyan)
+                    .frame(maxWidth: .infinity)
+                GaugeIndicatorView(value: Double(engine.queuedCount), maxValue: max(Double(engine.sessions.count), 1), label: "Queued", count: "\(engine.queuedCount)", color: NeonTheme.textTertiary)
+                    .frame(maxWidth: .infinity)
             }
 
-            HStack(spacing: 12) {
-                NavigationLink(value: DashboardDestination.dualFind) {
-                    toolCard(title: "Dual Find", subtitle: "Selector search and confirmation", symbol: "magnifyingglass.circle.fill")
-                }
-                .buttonStyle(.plain)
-
-                NavigationLink(value: DashboardDestination.recorder) {
-                    toolCard(title: "Recorder", subtitle: "Capture flows into Playwright actions", symbol: "record.circle.fill")
-                }
-                .buttonStyle(.plain)
+            HStack(spacing: 0) {
+                GaugeIndicatorView(value: Double(engine.noAccountCount), maxValue: max(Double(engine.sessions.count), 1), label: "No ACC", count: "\(engine.noAccountCount)", color: NeonTheme.neonIndigo)
+                    .frame(maxWidth: .infinity)
+                GaugeIndicatorView(value: Double(engine.tempDisabledCount), maxValue: max(Double(engine.sessions.count), 1), label: "Temp", count: "\(engine.tempDisabledCount)", color: NeonTheme.neonOrange)
+                    .frame(maxWidth: .infinity)
+                GaugeIndicatorView(value: Double(engine.permDisabledCount), maxValue: max(Double(engine.sessions.count), 1), label: "Perm", count: "\(engine.permDisabledCount)", color: NeonTheme.neonRed)
+                    .frame(maxWidth: .infinity)
+                GaugeIndicatorView(value: Double(engine.errorCount), maxValue: max(Double(engine.sessions.count), 1), label: "Error", count: "\(engine.errorCount)", color: NeonTheme.neonYellow)
+                    .frame(maxWidth: .infinity)
             }
         }
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: 16)
+                .fill(NeonTheme.cardBackground)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16)
+                        .stroke(NeonTheme.cardBorder, lineWidth: 0.5)
+                )
+        )
     }
 
-    private var healthSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text("System Health")
-                    .font(.headline)
-                    .foregroundStyle(.white)
-                Spacer()
-                Text(healthPercentText)
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(healthColor)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(healthColor.opacity(0.18), in: .capsule)
+    // MARK: - System Health Row
+
+    private var systemHealthRow: some View {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("System Health Waveform")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(NeonTheme.textTertiary)
+                WaveformView(barCount: 36, color: NeonTheme.neonGreen)
+                HStack {
+                    Text(engine.state.displayName)
+                        .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(engine.isRunning ? NeonTheme.neonGreen : NeonTheme.textTertiary)
+                    Spacer()
+                    Text(engine.elapsedFormatted)
+                        .font(.system(size: 10, weight: .medium, design: .monospaced))
+                        .foregroundStyle(NeonTheme.textTertiary)
+                }
             }
+            .padding(12)
+            .frame(maxWidth: .infinity)
+            .background(
+                RoundedRectangle(cornerRadius: 14)
+                    .fill(NeonTheme.cardBackground)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 14)
+                            .stroke(NeonTheme.cardBorder, lineWidth: 0.5)
+                    )
+            )
 
             VStack(spacing: 8) {
-                healthRow(label: "Memory", value: String(format: "%.0f MB", crashProtection.currentMemoryUsageMB), status: crashProtection.memoryPressureLevel.rawValue.capitalized, tint: memoryColor)
-                healthRow(label: "Pool", value: "\(pool.activeCount)/\(lifetimeBudget.effectiveMaxConcurrent)", status: lifetimeBudget.isOverBudget ? "Over Budget" : "Healthy", tint: lifetimeBudget.isOverBudget ? .red : .green)
-                healthRow(label: "Tracing", value: settings.enableTracing ? "Enabled" : "Disabled", status: settings.captureScreenshotsOnFailure ? "Failure shots" : "No fail shots", tint: settings.enableTracing ? .cyan : .secondary)
-                healthRow(label: "Checkpoint", value: sessionRecovery.hasResumableCheckpoint() ? "Available" : "None", status: sessionRecovery.diagnosticSummary, tint: sessionRecovery.hasResumableCheckpoint() ? .orange : .secondary)
+                Text("Memory Status")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(NeonTheme.textTertiary)
+
+                ZStack {
+                    Circle()
+                        .stroke(NeonTheme.memoryColor(crashProtection.memoryPressureLevel).opacity(0.15), lineWidth: 4)
+                    Circle()
+                        .trim(from: 0, to: memoryUsageFraction)
+                        .stroke(
+                            NeonTheme.memoryColor(crashProtection.memoryPressureLevel),
+                            style: StrokeStyle(lineWidth: 4, lineCap: .round)
+                        )
+                        .rotationEffect(.degrees(-90))
+
+                    Text("\(Int(crashProtection.currentMemoryUsageMB))")
+                        .font(.system(size: 12, weight: .bold, design: .monospaced))
+                        .foregroundStyle(NeonTheme.memoryColor(crashProtection.memoryPressureLevel))
+                }
+                .frame(width: 48, height: 48)
+
+                Text("\(crashProtection.memoryPressureLevel.rawValue.capitalized)")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(NeonTheme.memoryColor(crashProtection.memoryPressureLevel))
             }
+            .padding(12)
+            .frame(width: 100)
+            .background(
+                RoundedRectangle(cornerRadius: 14)
+                    .fill(NeonTheme.cardBackground)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 14)
+                            .stroke(NeonTheme.cardBorder, lineWidth: 0.5)
+                    )
+            )
         }
-        .padding(16)
-        .background(.ultraThinMaterial, in: .rect(cornerRadius: 20))
     }
 
-    private func summaryCard(title: String, value: String, detail: String, symbol: String, tint: Color) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Image(systemName: symbol)
-                .font(.title3)
-                .foregroundStyle(tint)
-            Text(title)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.white.opacity(0.62))
-            Text(value)
-                .font(.headline)
-                .foregroundStyle(.white)
-            Text(detail)
-                .font(.caption)
-                .foregroundStyle(.white.opacity(0.58))
-                .lineLimit(2)
-        }
-        .frame(maxWidth: .infinity, minHeight: 112, alignment: .leading)
-        .padding(14)
-        .background(.ultraThinMaterial, in: .rect(cornerRadius: 18))
-    }
+    // MARK: - Tools Section
 
-    private func quickSwitchButton(title: String, symbol: String, tab: AppTab) -> some View {
-        Button {
-            selectedTab = tab
-        } label: {
-            Label(title, systemImage: symbol)
-                .font(.subheadline.weight(.semibold))
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 10)
-        }
-        .buttonStyle(.bordered)
-        .tint(.white)
-    }
-
-    private func statusPill(title: String, value: String, symbol: String, tint: Color) -> some View {
-        HStack(spacing: 8) {
-            Image(systemName: symbol)
-                .foregroundStyle(tint)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(title)
-                    .font(.caption2)
-                    .foregroundStyle(.white.opacity(0.58))
-                Text(value)
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(.white)
+    private var toolsSection: some View {
+        HStack(spacing: 12) {
+            NavigationLink(value: DashboardDestination.dualFind) {
+                toolCard(title: "Dual Find", subtitle: "Selector search", symbol: "magnifyingglass.circle.fill", tint: NeonTheme.neonCyan)
             }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
-        .background(.white.opacity(0.08), in: .capsule)
-    }
+            .buttonStyle(.plain)
 
-    private var connectionBadge: some View {
-        HStack(spacing: 6) {
-            Circle()
-                .fill(orchestrator.isReady ? .green : .red)
-                .frame(width: 8, height: 8)
-            Text(orchestrator.isReady ? "LIVE" : "OFF")
-                .font(.caption2.weight(.black))
-                .foregroundStyle(orchestrator.isReady ? .green : .red)
+            NavigationLink(value: DashboardDestination.recorder) {
+                toolCard(title: "Recorder", subtitle: "Capture flows", symbol: "record.circle.fill", tint: NeonTheme.neonRed)
+            }
+            .buttonStyle(.plain)
         }
     }
 
-    private func toolCard(title: String, subtitle: String, symbol: String) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
+    private func toolCard(title: String, subtitle: String, symbol: String, tint: Color) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
             Image(systemName: symbol)
                 .font(.title2)
-                .foregroundStyle(.cyan)
+                .foregroundStyle(tint)
             Text(title)
-                .font(.headline)
-                .foregroundStyle(.white)
+                .font(.system(size: 14, weight: .bold))
+                .foregroundStyle(NeonTheme.textPrimary)
             Text(subtitle)
-                .font(.caption)
-                .foregroundStyle(.white.opacity(0.62))
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(NeonTheme.textTertiary)
         }
-        .frame(maxWidth: .infinity, minHeight: 124, alignment: .leading)
-        .padding(16)
-        .background(.ultraThinMaterial, in: .rect(cornerRadius: 20))
-    }
-
-    private func sessionCard(_ session: ConcurrentSession) -> some View {
-        VStack(spacing: 10) {
-            HStack(alignment: .top) {
-                ZStack {
-                    if let result = session.dualResult {
-                        Image(systemName: result.outcome.iconName)
-                            .font(.headline)
-                            .foregroundStyle(outcomeColor(result.outcome))
-                    } else {
-                        Image(systemName: session.phase.iconName)
-                            .font(.headline)
-                            .foregroundStyle(phaseColor(session.phase))
-                    }
-                }
-                .frame(width: 24)
-
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 6) {
-                        Text(session.credential.username)
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(.white)
-                            .lineLimit(1)
-                        if session.isFlaggedForReview {
-                            Image(systemName: "flag.fill")
-                                .font(.caption2)
-                                .foregroundStyle(.yellow)
-                        }
-                    }
-
-                    HStack(spacing: 8) {
-                        if let result = session.dualResult {
-                            Text(result.outcome.shortName)
-                                .foregroundStyle(outcomeColor(result.outcome))
-                        } else {
-                            Text(session.phase.displayName)
-                                .foregroundStyle(phaseColor(session.phase))
-                        }
-                        Text("Wave \(session.waveIndex + 1)")
-                            .foregroundStyle(.white.opacity(0.52))
-                        Text(session.proxyInfo)
-                            .foregroundStyle(.white.opacity(0.42))
-                    }
-                    .font(.caption)
-                    .lineLimit(1)
-                }
-
-                Spacer()
-
-                VStack(alignment: .trailing, spacing: 6) {
-                    if session.phase.isActive {
-                        ProgressView(value: session.progress)
-                            .tint(.cyan)
-                            .frame(width: 70)
-                    }
-                    Text(session.elapsedFormatted)
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.white.opacity(0.58))
-                }
-            }
-
-            if session.joeScreenshot != nil || session.ignitionScreenshot != nil {
-                HStack(spacing: 8) {
-                    screenshotThumbnail(label: "JOE", data: session.joeScreenshot, outcome: session.dualResult?.joeOutcome)
-                    screenshotThumbnail(label: "IGN", data: session.ignitionScreenshot, outcome: session.dualResult?.ignitionOutcome)
-                }
-            }
-
-            HStack(spacing: 12) {
-                if let result = session.dualResult {
-                    outcomeBadge("Joe", outcome: result.joeOutcome)
-                    outcomeBadge("Ign", outcome: result.ignitionOutcome)
-                    Spacer()
-                    Text(result.duration.formatted(.number.precision(.fractionLength(1))))
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.white.opacity(0.6))
-                    Text("s")
-                        .font(.caption2)
-                        .foregroundStyle(.white.opacity(0.5))
-                } else if let errorMessage = session.errorMessage {
-                    Text(errorMessage)
-                        .font(.caption)
-                        .foregroundStyle(.red.opacity(0.92))
-                        .lineLimit(2)
-                    Spacer()
-                } else {
-                    Text("Tap for proof and full timeline")
-                        .font(.caption)
-                        .foregroundStyle(.white.opacity(0.52))
-                    Spacer()
-                }
-
-                Image(systemName: "chevron.right")
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(.white.opacity(0.38))
-            }
-
-            if session.phase.isTerminal {
-                HStack(spacing: 12) {
-                    if session.phase == .failed {
-                        Button {
-                            engine.enqueueRetry(session.credential)
-                        } label: {
-                            Label("Retry", systemImage: "arrow.clockwise")
-                                .font(.caption.weight(.semibold))
-                        }
-                        .buttonStyle(.bordered)
-                        .tint(.orange)
-                        .controlSize(.small)
-                    }
-
-                    Button {
-                        UIPasteboard.general.string = session.credential.username
-                    } label: {
-                        Label("Copy", systemImage: "doc.on.doc")
-                            .font(.caption.weight(.semibold))
-                    }
-                    .buttonStyle(.bordered)
-                    .tint(.blue)
-                    .controlSize(.small)
-
-                    Button {
-                        session.toggleFlagged()
-                    } label: {
-                        Label(
-                            session.isFlaggedForReview ? "Unflag" : "Flag",
-                            systemImage: session.isFlaggedForReview ? "flag.slash.fill" : "flag.fill"
-                        )
-                        .font(.caption.weight(.semibold))
-                    }
-                    .buttonStyle(.bordered)
-                    .tint(.yellow)
-                    .controlSize(.small)
-
-                    Spacer()
-                }
-            }
-        }
+        .frame(maxWidth: .infinity, minHeight: 90, alignment: .leading)
         .padding(14)
-        .background(.ultraThinMaterial, in: .rect(cornerRadius: 18))
-        .onTapGesture {
-            selectedSession = session
+        .background(
+            RoundedRectangle(cornerRadius: 14)
+                .fill(NeonTheme.cardBackground)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14)
+                        .stroke(NeonTheme.cardBorder, lineWidth: 0.5)
+                )
+        )
+    }
+
+    // MARK: - Session Feed
+
+    private var sessionFeedSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("Sessions")
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundStyle(NeonTheme.textPrimary)
+                Spacer()
+                Text("\(filteredSessions.count) shown")
+                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(NeonTheme.textTertiary)
+            }
+
+            sessionFilterBar
+
+            if filteredSessions.isEmpty {
+                emptySessionState
+            } else {
+                LazyVStack(spacing: 10) {
+                    ForEach(filteredSessions) { session in
+                        SessionCardView(
+                            session: session,
+                            onTap: { selectedSession = session },
+                            onRetry: { engine.enqueueRetry(session.credential) },
+                            onCopy: { UIPasteboard.general.string = session.credential.username },
+                            onFlag: { session.toggleFlagged() }
+                        )
+                    }
+                }
+            }
         }
     }
 
-    private func screenshotThumbnail(label: String, data: Data?, outcome: DualLoginOutcome?) -> some View {
-        Group {
-            if let data, let uiImage = UIImage(data: data) {
-                Color(.secondarySystemBackground)
-                    .frame(height: 76)
-                    .overlay {
-                        Image(uiImage: uiImage)
-                            .resizable()
-                            .aspectRatio(contentMode: .fill)
-                            .allowsHitTesting(false)
-                    }
-                    .clipShape(.rect(cornerRadius: 10))
-                    .overlay(alignment: .topLeading) {
+    private var sessionFilterBar: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                ForEach(SessionVisibilityFilter.allCases, id: \.self) { filter in
+                    Button {
+                        sessionFilter = filter
+                    } label: {
                         HStack(spacing: 4) {
-                            Circle()
-                                .fill(outcomeColor(outcome))
-                                .frame(width: 6, height: 6)
-                            Text(label)
-                                .font(.caption2.weight(.bold))
-                                .foregroundStyle(.white)
+                            Image(systemName: filter.iconName)
+                                .font(.system(size: 8))
+                            Text(filter.title)
+                            Text("\(count(for: filter))")
+                                .foregroundStyle(sessionFilter == filter ? NeonTheme.neonGreen : NeonTheme.textTertiary)
                         }
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 4)
-                        .background(.black.opacity(0.68), in: .capsule)
-                        .padding(6)
+                        .font(.system(size: 10, weight: .semibold))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 7)
+                        .background(
+                            Capsule()
+                                .fill(sessionFilter == filter ? NeonTheme.neonGreen.opacity(0.12) : Color.white.opacity(0.04))
+                        )
+                        .overlay(
+                            Capsule()
+                                .stroke(sessionFilter == filter ? NeonTheme.neonGreen.opacity(0.4) : Color.white.opacity(0.06), lineWidth: 0.5)
+                        )
                     }
-            } else {
-                RoundedRectangle(cornerRadius: 10)
-                    .fill(.white.opacity(0.06))
-                    .frame(height: 76)
-                    .overlay {
-                        VStack(spacing: 4) {
-                            Image(systemName: "camera.fill")
-                                .font(.subheadline)
-                            Text(label)
-                                .font(.caption2.weight(.bold))
-                        }
-                        .foregroundStyle(.white.opacity(0.25))
-                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(sessionFilter == filter ? NeonTheme.neonGreen : NeonTheme.textSecondary)
+                }
             }
+        }
+        .contentMargins(.horizontal, 0)
+    }
+
+    private var emptySessionState: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "rectangle.stack.badge.play")
+                .font(.system(size: 28))
+                .foregroundStyle(NeonTheme.textTertiary)
+            Text("No Sessions")
+                .font(.system(size: 14, weight: .bold))
+                .foregroundStyle(NeonTheme.textSecondary)
+            Text("Start a dual run to see live progress, proof screenshots, and outcome breakdowns here.")
+                .font(.system(size: 11))
+                .foregroundStyle(NeonTheme.textTertiary)
+                .multilineTextAlignment(.center)
         }
         .frame(maxWidth: .infinity)
+        .padding(.vertical, 32)
+        .background(
+            RoundedRectangle(cornerRadius: 16)
+                .fill(NeonTheme.cardBackground)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16)
+                        .stroke(NeonTheme.cardBorder, lineWidth: 0.5)
+                )
+        )
     }
 
-    private func outcomeBadge(_ title: String, outcome: DualLoginOutcome) -> some View {
+    // MARK: - Connection Badge
+
+    private var connectionBadge: some View {
         HStack(spacing: 5) {
-            Image(systemName: outcome.iconName)
-                .font(.system(size: 8))
-                .foregroundStyle(outcomeColor(outcome))
-            Text("\(title): \(outcome.shortName)")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.white.opacity(0.72))
+            Circle()
+                .fill(orchestrator.isReady ? NeonTheme.neonGreen : NeonTheme.neonRed)
+                .frame(width: 6, height: 6)
+                .neonGlow(orchestrator.isReady ? NeonTheme.neonGreen : NeonTheme.neonRed, radius: 3)
+            Text(orchestrator.isReady ? "LIVE" : "OFF")
+                .font(.system(size: 9, weight: .black, design: .monospaced))
+                .foregroundStyle(orchestrator.isReady ? NeonTheme.neonGreen : NeonTheme.neonRed)
         }
     }
 
-    private func healthRow(label: String, value: String, status: String, tint: Color) -> some View {
-        HStack(alignment: .top, spacing: 10) {
-            Text(label)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.white.opacity(0.56))
-                .frame(width: 76, alignment: .leading)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(value)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.white)
-                Text(status)
-                    .font(.caption2)
-                    .foregroundStyle(tint)
-                    .lineLimit(2)
-            }
-            Spacer()
-        }
-    }
+    // MARK: - Data Helpers
 
     private var filteredSessions: [ConcurrentSession] {
         let base: [ConcurrentSession]
@@ -668,54 +546,10 @@ struct DashboardView: View {
         credentials.filter(\.isEnabled).count
     }
 
-    private var healthPercentText: String {
-        engine.healthScore.formatted(.percent.precision(.fractionLength(0)))
-    }
-
-    private var healthColor: Color {
-        if engine.healthScore > 0.7 { return .green }
-        if engine.healthScore > 0.4 { return .orange }
-        return .red
-    }
-
-    private var backgroundTimeLabel: String {
-        if backgroundService.remainingBackgroundTime > 900 {
-            return "Foreground"
-        }
-        if backgroundService.remainingBackgroundTime == 0 {
-            return "Idle"
-        }
-        return "\(Int(backgroundService.remainingBackgroundTime))s"
-    }
-
-    private var memoryColor: Color {
-        switch crashProtection.memoryPressureLevel {
-        case .safe: .green
-        case .elevated: .yellow
-        case .critical: .orange
-        case .emergency: .red
-        }
-    }
-
-    private func phaseColor(_ phase: SessionPhase) -> Color {
-        switch phase {
-        case .succeeded: .green
-        case .failed: .red
-        case .cancelled: .gray
-        case .queued: .secondary
-        default: .cyan
-        }
-    }
-
-    private func outcomeColor(_ outcome: DualLoginOutcome?) -> Color {
-        guard let outcome else { return .gray }
-        switch outcome {
-        case .success: return .green
-        case .noAccount: return .indigo
-        case .permDisabled: return .red
-        case .tempDisabled: return .orange
-        case .unsure: return .purple
-        case .error: return .yellow
-        }
+    private var memoryUsageFraction: Double {
+        let usage = crashProtection.currentMemoryUsageMB
+        let threshold = Double(settings.memoryEmergencyThresholdMB)
+        guard threshold > 0 else { return 0 }
+        return min(usage / threshold, 1.0)
     }
 }
