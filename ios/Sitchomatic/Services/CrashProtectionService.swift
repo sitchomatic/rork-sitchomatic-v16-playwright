@@ -28,10 +28,18 @@ final class CrashProtectionService {
     private(set) var cooldownUntil: Date?
     private var monitorTask: Task<Void, Never>?
 
-    private var baseMemoryCriticalThresholdMB: Double = 800
-    private var baseMemoryEmergencyThresholdMB: Double = 1000
-    private var baseMemorySafeThresholdMB: Double = 500
-    private var baseMemoryElevatedThresholdMB: Double = 600
+    private var baseMemoryCriticalThresholdMB: Double {
+        Double(AutomationSettings.shared.memoryCriticalThresholdMB)
+    }
+    private var baseMemoryEmergencyThresholdMB: Double {
+        Double(AutomationSettings.shared.memoryEmergencyThresholdMB)
+    }
+    private var baseMemorySafeThresholdMB: Double {
+        Double(AutomationSettings.shared.memorySafeThresholdMB)
+    }
+    private var baseMemoryElevatedThresholdMB: Double {
+        Double(AutomationSettings.shared.memoryElevatedThresholdMB)
+    }
 
     private let thresholdReductionPerCrash: Double = 30
     private let maxThresholdReduction: Double = 200

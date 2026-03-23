@@ -423,21 +423,21 @@ final class Locator {
 
         if let textFilter {
             let escapedText = textFilter.replacingOccurrences(of: "'", with: "\\'")
-            js += "var allEls = \(scope).querySelectorAll('\\(escapedSelector)');\n"
+            js += "var allEls = \(scope).querySelectorAll('\(escapedSelector)');\n"
             js += "var el = null;\n"
             js += "for (var i = 0; i < allEls.length; i++) {\n"
             js += "  var text = allEls[i].innerText || allEls[i].textContent || '';\n"
-            js += "  if (text.indexOf('\\(escapedText)') !== -1) { el = allEls[i]; break; }\n"
+            js += "  if (text.indexOf('\(escapedText)') !== -1) { el = allEls[i]; break; }\n"
             js += "}\n"
         } else if let nthIndex {
-            js += "var allEls = \(scope).querySelectorAll('\\(escapedSelector)');\n"
+            js += "var allEls = \(scope).querySelectorAll('\(escapedSelector)');\n"
             if nthIndex == -1 {
                 js += "var el = allEls.length > 0 ? allEls[allEls.length - 1] : null;\n"
             } else {
                 js += "var el = allEls.length > \(nthIndex) ? allEls[\(nthIndex)] : null;\n"
             }
         } else {
-            js += "var el = \(scope).querySelector('\\(escapedSelector)');\n"
+            js += "var el = \(scope).querySelector('\(escapedSelector)');\n"
         }
 
         if parentSelector != nil {

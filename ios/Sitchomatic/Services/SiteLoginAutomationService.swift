@@ -256,7 +256,7 @@ final class SiteLoginAutomationService {
     }
 }
 
-private nonisolated struct SelectorMatch: Sendable {
+private struct SelectorMatch {
     let selector: String
     let locator: Locator
 }

@@ -31,7 +31,7 @@ struct FlowRecorderContainerView: View {
             .padding(.top, 12)
             .padding(.bottom, 24)
         }
-        .background(Color(.systemGroupedBackground))
+        .background(NeonTheme.trueBlack)
         .navigationTitle("Flow Recorder")
         .navigationBarTitleDisplayMode(.large)
         .task {
@@ -75,7 +75,11 @@ struct FlowRecorderContainerView: View {
             }
         }
         .padding(18)
-        .background(.regularMaterial, in: .rect(cornerRadius: 22))
+        .background(
+            RoundedRectangle(cornerRadius: 16)
+                .fill(NeonTheme.cardBackground)
+                .overlay(RoundedRectangle(cornerRadius: 16).stroke(NeonTheme.cardBorder, lineWidth: 0.5))
+        )
     }
 
     private var compositionCard: some View {
@@ -187,7 +191,11 @@ struct FlowRecorderContainerView: View {
             }
         }
         .padding(18)
-        .background(.regularMaterial, in: .rect(cornerRadius: 22))
+        .background(
+            RoundedRectangle(cornerRadius: 16)
+                .fill(NeonTheme.cardBackground)
+                .overlay(RoundedRectangle(cornerRadius: 16).stroke(NeonTheme.cardBorder, lineWidth: 0.5))
+        )
     }
 
     private var quickInsertCard: some View {
@@ -223,7 +231,11 @@ struct FlowRecorderContainerView: View {
             }
         }
         .padding(18)
-        .background(.regularMaterial, in: .rect(cornerRadius: 22))
+        .background(
+            RoundedRectangle(cornerRadius: 16)
+                .fill(NeonTheme.cardBackground)
+                .overlay(RoundedRectangle(cornerRadius: 16).stroke(NeonTheme.cardBorder, lineWidth: 0.5))
+        )
     }
 
     private var actionsCard: some View {
@@ -268,13 +280,17 @@ struct FlowRecorderContainerView: View {
                                 .frame(maxWidth: .infinity, alignment: .leading)
                         }
                         .padding(12)
-                        .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 16))
+                        .background(NeonTheme.cardBackground, in: .rect(cornerRadius: 16))
                     }
                 }
             }
         }
-        .padding(18)
-        .background(.regularMaterial, in: .rect(cornerRadius: 22))
+        .padding(16)
+        .background(
+            RoundedRectangle(cornerRadius: 16)
+                .fill(NeonTheme.cardBackground)
+                .overlay(RoundedRectangle(cornerRadius: 16).stroke(NeonTheme.cardBorder, lineWidth: 0.5))
+        )
     }
 
     private var generatedCodeCard: some View {
@@ -355,12 +371,16 @@ struct FlowRecorderContainerView: View {
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(12)
-                        .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 16))
+                        .background(NeonTheme.cardBackground, in: .rect(cornerRadius: 16))
                 }
             }
         }
-        .padding(18)
-        .background(.regularMaterial, in: .rect(cornerRadius: 22))
+        .padding(16)
+        .background(
+            RoundedRectangle(cornerRadius: 16)
+                .fill(NeonTheme.cardBackground)
+                .overlay(RoundedRectangle(cornerRadius: 16).stroke(NeonTheme.cardBorder, lineWidth: 0.5))
+        )
     }
 
     private var ppsrCard: some View {
@@ -380,7 +400,11 @@ struct FlowRecorderContainerView: View {
             ppsrRow(label: "Recovery", value: recovery.diagnosticSummary, tint: recovery.hasResumableCheckpoint() ? .orange : .green)
         }
         .padding(18)
-        .background(.regularMaterial, in: .rect(cornerRadius: 22))
+        .background(
+            RoundedRectangle(cornerRadius: 16)
+                .fill(NeonTheme.cardBackground)
+                .overlay(RoundedRectangle(cornerRadius: 16).stroke(NeonTheme.cardBorder, lineWidth: 0.5))
+        )
     }
 
     private var selectedSite: AutomationSite? {
@@ -485,7 +509,7 @@ struct FlowRecorderContainerView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(14)
-            .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 18))
+            .background(NeonTheme.cardBackground, in: .rect(cornerRadius: 18))
         }
         .buttonStyle(.plain)
     }
@@ -625,7 +649,7 @@ struct FlowRecorderContainerView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(12)
-        .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 14))
+        .background(Color.white.opacity(0.03), in: .rect(cornerRadius: 14))
     }
 
     private func ppsrRow(label: String, value: String, tint: Color) -> some View {

@@ -34,9 +34,11 @@ struct DualFindContainerView: View {
             .padding(.top, 12)
             .padding(.bottom, 24)
         }
-        .background(Color(.systemGroupedBackground))
+        .background(NeonTheme.trueBlack)
         .navigationTitle("Dual Find")
-        .navigationBarTitleDisplayMode(.large)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbarBackground(NeonTheme.trueBlack, for: .navigationBar)
+        .toolbarColorScheme(.dark, for: .navigationBar)
         .task {
             syncSelection(forceSelectorRefresh: true)
         }
@@ -66,10 +68,11 @@ struct DualFindContainerView: View {
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.cyan)
                     Text("Inspect login DOM, capture proof, and persist PPSR artifacts.")
-                        .font(.title3.weight(.bold))
-                    Text("Site presets follow the Joe and Ignition profiles already configured in Settings, and future targets expand naturally from AutomationSite.")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundStyle(NeonTheme.textPrimary)
+                    Text("Site presets follow the Joe and Ignition profiles already configured in Settings.")
+                        .font(.system(size: 11))
+                        .foregroundStyle(NeonTheme.textTertiary)
                 }
 
                 Spacer()
@@ -77,7 +80,7 @@ struct DualFindContainerView: View {
                 VStack(alignment: .trailing, spacing: 6) {
                     Label(orchestrator.connectionStatus.displayName, systemImage: orchestrator.connectionStatus.iconName)
                         .font(.caption.weight(.semibold))
-                        .foregroundStyle(orchestrator.connectionStatus == .connected ? .green : .secondary)
+                        .foregroundStyle(orchestrator.connectionStatus == .connected ? NeonTheme.neonGreen : NeonTheme.textTertiary)
                     Text(orchestrator.networkStatusSummary)
                         .font(.caption2.monospaced())
                         .foregroundStyle(.secondary)
@@ -91,14 +94,19 @@ struct DualFindContainerView: View {
                 statPill(title: "Storage", value: String(format: "%.1f MB", PersistentFileStorageService.shared.storageSizeMB), tint: .secondary)
             }
         }
-        .padding(18)
-        .background(.regularMaterial, in: .rect(cornerRadius: 22))
+        .padding(16)
+        .background(
+            RoundedRectangle(cornerRadius: 16)
+                .fill(NeonTheme.cardBackground)
+                .overlay(RoundedRectangle(cornerRadius: 16).stroke(NeonTheme.cardBorder, lineWidth: 0.5))
+        )
     }
 
     private var configurationCard: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Configuration")
-                .font(.headline)
+                .font(.system(size: 13, weight: .bold))
+                .foregroundStyle(NeonTheme.textPrimary)
 
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
@@ -132,16 +140,20 @@ struct DualFindContainerView: View {
                     .foregroundStyle(.secondary)
 
                 TextField("https://example.com/login", text: urlBinding)
-                    .font(.footnote.monospaced())
-                    .textFieldStyle(.roundedBorder)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(NeonTheme.textPrimary)
+                    .textFieldStyle(.plain)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
+                    .padding(10)
+                    .background(Color.white.opacity(0.04), in: .rect(cornerRadius: 10))
+                    .overlay(RoundedRectangle(cornerRadius: 10).stroke(NeonTheme.cardBorder, lineWidth: 0.5))
             }
 
             VStack(alignment: .leading, spacing: 8) {
                 Text("Selector family")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(NeonTheme.textTertiary)
 
                 Picker("Selector family", selection: $selectorFamily) {
                     ForEach(DualFindSelectorFamily.allCases, id: \.self) { family in
@@ -158,10 +170,14 @@ struct DualFindContainerView: View {
                     .foregroundStyle(.secondary)
 
                 TextField("button[type='submit']", text: $selectorQuery)
-                    .font(.footnote.monospaced())
-                    .textFieldStyle(.roundedBorder)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(NeonTheme.textPrimary)
+                    .textFieldStyle(.plain)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
+                    .padding(10)
+                    .background(Color.white.opacity(0.04), in: .rect(cornerRadius: 10))
+                    .overlay(RoundedRectangle(cornerRadius: 10).stroke(NeonTheme.cardBorder, lineWidth: 0.5))
             }
 
             if !recommendedSelectors.isEmpty {
@@ -219,8 +235,12 @@ struct DualFindContainerView: View {
             .tint(.cyan)
             .disabled(isSearching || resolvedURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || trimmedSelectorQuery.isEmpty)
         }
-        .padding(18)
-        .background(.regularMaterial, in: .rect(cornerRadius: 22))
+        .padding(16)
+        .background(
+            RoundedRectangle(cornerRadius: 16)
+                .fill(NeonTheme.cardBackground)
+                .overlay(RoundedRectangle(cornerRadius: 16).stroke(NeonTheme.cardBorder, lineWidth: 0.5))
+        )
     }
 
     private var resultsCard: some View {
@@ -300,13 +320,17 @@ struct DualFindContainerView: View {
                             }
                         }
                         .padding(14)
-                        .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 16))
+                        .background(NeonTheme.cardBackground, in: .rect(cornerRadius: 16))
                     }
                 }
             }
         }
-        .padding(18)
-        .background(.regularMaterial, in: .rect(cornerRadius: 22))
+        .padding(16)
+        .background(
+            RoundedRectangle(cornerRadius: 16)
+                .fill(NeonTheme.cardBackground)
+                .overlay(RoundedRectangle(cornerRadius: 16).stroke(NeonTheme.cardBorder, lineWidth: 0.5))
+        )
     }
 
     private var proofCard: some View {
@@ -324,7 +348,7 @@ struct DualFindContainerView: View {
             }
 
             if let proofImage {
-                Color(.secondarySystemBackground)
+                Color(white: 0.08)
                     .frame(height: 220)
                     .overlay {
                         Image(uiImage: proofImage)
@@ -335,8 +359,12 @@ struct DualFindContainerView: View {
                     .clipShape(.rect(cornerRadius: 18))
             }
         }
-        .padding(18)
-        .background(.regularMaterial, in: .rect(cornerRadius: 22))
+        .padding(16)
+        .background(
+            RoundedRectangle(cornerRadius: 16)
+                .fill(NeonTheme.cardBackground)
+                .overlay(RoundedRectangle(cornerRadius: 16).stroke(NeonTheme.cardBorder, lineWidth: 0.5))
+        )
     }
 
     private var ppsrCard: some View {
@@ -355,8 +383,12 @@ struct DualFindContainerView: View {
             ppsrRow(label: "Storage", value: String(format: "%.1f MB", PersistentFileStorageService.shared.storageSizeMB), tint: .blue)
             ppsrRow(label: "Recovery", value: recovery.diagnosticSummary, tint: recovery.hasResumableCheckpoint() ? .orange : .green)
         }
-        .padding(18)
-        .background(.regularMaterial, in: .rect(cornerRadius: 22))
+        .padding(16)
+        .background(
+            RoundedRectangle(cornerRadius: 16)
+                .fill(NeonTheme.cardBackground)
+                .overlay(RoundedRectangle(cornerRadius: 16).stroke(NeonTheme.cardBorder, lineWidth: 0.5))
+        )
     }
 
     private func statPill(title: String, value: String, tint: Color) -> some View {
@@ -371,7 +403,7 @@ struct DualFindContainerView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(12)
-        .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 14))
+        .background(Color.white.opacity(0.03), in: .rect(cornerRadius: 14))
     }
 
     private func ppsrRow(label: String, value: String, tint: Color) -> some View {
