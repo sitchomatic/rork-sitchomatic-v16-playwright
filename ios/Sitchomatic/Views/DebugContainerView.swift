@@ -290,6 +290,7 @@ struct DebugContainerView: View {
         case .trace: NeonTheme.textDim
         case .debug: NeonTheme.textTertiary
         case .info: NeonTheme.neonCyan
+        case .success: NeonTheme.neonGreen
         case .warning: NeonTheme.neonOrange
         case .error: NeonTheme.neonRed
         case .critical: NeonTheme.neonMagenta

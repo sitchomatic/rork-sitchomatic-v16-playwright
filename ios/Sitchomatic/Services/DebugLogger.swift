@@ -10,9 +10,10 @@ final class DebugLogger {
         case trace = 0
         case debug = 1
         case info = 2
-        case warning = 3
-        case error = 4
-        case critical = 5
+        case success = 3
+        case warning = 4
+        case error = 5
+        case critical = 6
 
         nonisolated static func < (lhs: LogLevel, rhs: LogLevel) -> Bool {
             lhs.rawValue < rhs.rawValue
@@ -23,6 +24,7 @@ final class DebugLogger {
             case .trace: "🔍"
             case .debug: "🐛"
             case .info: "ℹ️"
+            case .success: "✅"
             case .warning: "⚠️"
             case .error: "❌"
             case .critical: "🔴"
@@ -34,6 +36,7 @@ final class DebugLogger {
             case .trace: "Trace"
             case .debug: "Debug"
             case .info: "Info"
+            case .success: "Success"
             case .warning: "Warn"
             case .error: "Error"
             case .critical: "Critical"
@@ -46,6 +49,7 @@ final class DebugLogger {
         case webView
         case network
         case proxy
+        case vpn
         case stealth
         case persistence
         case crash
@@ -59,6 +63,7 @@ final class DebugLogger {
             case .webView: "WebView"
             case .network: "Network"
             case .proxy: "Proxy"
+            case .vpn: "VPN"
             case .stealth: "Stealth"
             case .persistence: "Storage"
             case .crash: "Crash"
@@ -108,7 +113,7 @@ final class DebugLogger {
         switch level {
         case .trace, .debug:
             osLog.debug("\(message)")
-        case .info:
+        case .info, .success:
             osLog.info("\(message)")
         case .warning:
             osLog.warning("\(message)")

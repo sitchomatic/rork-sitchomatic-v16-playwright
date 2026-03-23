@@ -173,7 +173,7 @@ final class WebViewPool {
         switch networkConfig {
         case .direct:
             dataStore.proxyConfigurations = []
-        case .socks5(let host, let port):
+        case .socks5(let host, let port), .wireProxy(let host, let port):
             if let proxyConfiguration = ProxyConfigurationHelper.createProxyConfiguration(host: host, port: port) {
                 dataStore.proxyConfigurations = [proxyConfiguration]
             } else {

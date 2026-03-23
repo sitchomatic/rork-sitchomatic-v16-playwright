@@ -34,11 +34,13 @@ nonisolated struct ProxyEndpoint: Sendable {
 nonisolated enum ActiveNetworkConfig: Sendable {
     case direct
     case socks5(host: String, port: Int)
+    case wireProxy(host: String, port: Int)
 
     var label: String {
         switch self {
         case .direct: "Direct"
         case .socks5(let host, let port): "SOCKS5(\(host):\(port))"
+        case .wireProxy(let host, let port): "WireProxy(\(host):\(port))"
         }
     }
 }
@@ -54,8 +56,9 @@ final class SimpleNetworkManager {
     private(set) var currentNetworkConfig: ActiveNetworkConfig = .direct
 
     private var proxyEndpoints: [String: ProxyEndpoint] = [:]
-    private var wireProxyBridges: [WireProxyBridge] = []
     private let logger = DebugLogger.shared
+    private let localProxy = LocalProxyServer.shared
+    private let wireBridge = WireProxyBridge.shared
     private var socks5Proxies: [(host: String, port: Int)] = []
     private var currentIndex: Int = 0
     private var rotationTask: Task<Void, Never>?
@@ -90,6 +93,24 @@ final class SimpleNetworkManager {
         connectionStatus = .connecting
         statusMessage = "Connecting..."
 
+        if wireBridge.isActive {
+            let proxyConfig = localProxy.localProxyConfig
+            currentNetworkConfig = .wireProxy(host: proxyConfig.host, port: proxyConfig.port)
+            proxyCount = wireBridge.multiTunnelMode ? wireBridge.activeTunnelCount : 1
+            connectionStatus = .connected
+            statusMessage = "Connected via WireProxy tunnel"
+            return
+        }
+
+        if localProxy.isRunning {
+            let proxyConfig = localProxy.localProxyConfig
+            currentNetworkConfig = .socks5(host: proxyConfig.host, port: proxyConfig.port)
+            proxyCount = 1
+            connectionStatus = .connected
+            statusMessage = "Connected via LocalProxy"
+            return
+        }
+
         if !socks5Proxies.isEmpty {
             do {
                 try await connectSOCKS5()
@@ -107,10 +128,8 @@ final class SimpleNetworkManager {
     }
 
     func disconnect() {
-        for bridge in wireProxyBridges {
-            bridge.disconnect()
-        }
-        wireProxyBridges.removeAll()
+        wireBridge.stop()
+        localProxy.stop()
         proxyEndpoints.removeAll()
         proxyCount = 0
         connectionStatus = .disconnected
@@ -132,10 +151,16 @@ final class SimpleNetworkManager {
             return cached
         }
 
-        guard !wireProxyBridges.isEmpty else { return nil }
+        if localProxy.isRunning {
+            let config = localProxy.localProxyConfig
+            let endpoint = ProxyEndpoint(host: config.host, port: config.port)
+            proxyEndpoints[sessionID] = endpoint
+            return endpoint
+        }
 
-        let bridge = wireProxyBridges[abs(sessionID.hashValue) % wireProxyBridges.count]
-        let endpoint = ProxyEndpoint(host: "127.0.0.1", port: bridge.localPort)
+        guard !socks5Proxies.isEmpty else { return nil }
+        let proxy = socks5Proxies[abs(sessionID.hashValue) % socks5Proxies.count]
+        let endpoint = ProxyEndpoint(host: proxy.host, port: proxy.port)
         proxyEndpoints[sessionID] = endpoint
         return endpoint
     }
@@ -156,15 +181,42 @@ final class SimpleNetworkManager {
         logger.log("Configured \(proxies.count) SOCKS5 proxies", category: .network, level: .info)
     }
 
-    func addWireProxyBridge(_ bridge: WireProxyBridge) {
-        wireProxyBridges.append(bridge)
-        proxyCount = wireProxyBridges.count
-        logger.log("Added WireProxy bridge (total: \(proxyCount))", category: .network, level: .info)
+    func startLocalProxy(upstream: ProxyConfig? = nil) {
+        localProxy.updateUpstream(upstream)
+        localProxy.start()
+        proxyCount = 1
+        logger.log("Started local proxy server", category: .network, level: .info)
+    }
+
+    func startWireProxyTunnel(config: WireGuardConfig) async {
+        localProxy.start()
+        localProxy.enableWireProxyMode(true)
+        await wireBridge.start(with: config)
+        if wireBridge.isActive {
+            proxyCount = 1
+            connectionStatus = .connected
+            statusMessage = "Connected via WireProxy tunnel"
+            let proxyConfig = localProxy.localProxyConfig
+            currentNetworkConfig = .wireProxy(host: proxyConfig.host, port: proxyConfig.port)
+        }
+    }
+
+    func startMultiTunnel(configs: [WireGuardConfig]) async {
+        localProxy.start()
+        localProxy.enableWireProxyMode(true)
+        await wireBridge.startMultiple(configs: configs)
+        if wireBridge.isActive {
+            proxyCount = wireBridge.activeTunnelCount
+            connectionStatus = .connected
+            statusMessage = "Connected via \(proxyCount) WireProxy tunnels"
+            let proxyConfig = localProxy.localProxyConfig
+            currentNetworkConfig = .wireProxy(host: proxyConfig.host, port: proxyConfig.port)
+        }
     }
 
     func rotateToNextProxy() async {
-        guard !wireProxyBridges.isEmpty else { return }
-        currentIndex = (currentIndex + 1) % wireProxyBridges.count
+        guard !socks5Proxies.isEmpty else { return }
+        currentIndex = (currentIndex + 1) % socks5Proxies.count
         proxyEndpoints.removeAll()
         logger.log("Rotated to proxy index \(currentIndex)", category: .network, level: .debug)
     }
@@ -178,23 +230,23 @@ final class SimpleNetworkManager {
             let (_, _) = try await URLSession.shared.data(for: request)
             let elapsed = Date().timeIntervalSince(start)
             lastLatencyMs = Int(elapsed * 1000)
-            logger.log("Latency measured: \(lastLatencyMs)ms", category: .network, level: .debug)
         } catch {
             lastLatencyMs = -1
-            logger.log("Latency measurement failed: \(error.localizedDescription)", category: .network, level: .warning)
         }
     }
 
     func runProxyHealthChecks() async {
-        for (index, bridge) in wireProxyBridges.enumerated() {
-            let key = "bridge_\(index)_\(bridge.localPort)"
-            if bridge.isConnected {
-                proxyHealthStatus[key] = .healthy
-            } else {
-                proxyHealthStatus[key] = .unreachable
-            }
+        if wireBridge.isActive {
+            proxyHealthStatus["wireguard_bridge"] = .healthy
+        } else if wireBridge.status == .failed {
+            proxyHealthStatus["wireguard_bridge"] = .unreachable
         }
-        logger.log("Health check: \(healthyProxyCount)/\(wireProxyBridges.count) healthy", category: .network, level: .info)
+
+        if localProxy.isRunning {
+            proxyHealthStatus["local_proxy"] = .healthy
+        } else {
+            proxyHealthStatus["local_proxy"] = .unreachable
+        }
     }
 
     func startPeriodicHealthChecks(intervalSeconds: Int) {
