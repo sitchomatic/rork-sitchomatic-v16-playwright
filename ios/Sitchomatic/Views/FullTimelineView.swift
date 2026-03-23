@@ -16,11 +16,19 @@ struct FullTimelineView: View {
                         .padding(.bottom, 16)
 
                     if session.logEntries.isEmpty {
-                        ContentUnavailableView(
-                            "No Timeline",
-                            systemImage: "clock.arrow.circlepath",
-                            description: Text("This session has no recorded log entries yet.")
-                        )
+                        VStack(spacing: 12) {
+                            Image(systemName: "clock.arrow.circlepath")
+                                .font(.system(size: 28))
+                                .foregroundStyle(NeonTheme.textTertiary)
+                            Text("No Timeline")
+                                .font(.system(size: 14, weight: .bold))
+                                .foregroundStyle(NeonTheme.textSecondary)
+                            Text("This session has no recorded log entries yet.")
+                                .font(.system(size: 11))
+                                .foregroundStyle(NeonTheme.textTertiary)
+                                .multilineTextAlignment(.center)
+                        }
+                        .frame(maxWidth: .infinity)
                         .padding(.top, 40)
                     } else {
                         LazyVStack(alignment: .leading, spacing: 0) {
@@ -33,16 +41,21 @@ struct FullTimelineView: View {
                     }
                 }
             }
-            .background(Color(.systemGroupedBackground))
+            .background(NeonTheme.trueBlack)
             .navigationTitle("Full Timeline")
             .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(NeonTheme.trueBlack, for: .navigationBar)
+            .toolbarColorScheme(.dark, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Done") { dismiss() }
+                        .foregroundStyle(NeonTheme.neonCyan)
                 }
             }
         }
     }
+
+    // MARK: - Header
 
     private var timelineHeader: some View {
         VStack(spacing: 12) {
@@ -50,50 +63,55 @@ struct FullTimelineView: View {
                 if let result = session.dualResult {
                     Image(systemName: result.outcome.iconName)
                         .font(.title2)
-                        .foregroundStyle(outcomeColor(result.outcome))
+                        .foregroundStyle(NeonTheme.outcomeColor(result.outcome))
+                        .neonGlow(NeonTheme.outcomeColor(result.outcome), radius: 4)
                 } else {
                     Image(systemName: session.phase.iconName)
                         .font(.title2)
-                        .foregroundStyle(.cyan)
+                        .foregroundStyle(NeonTheme.neonCyan)
                 }
 
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: 3) {
                     Text(session.credential.username)
-                        .font(.headline)
+                        .font(.system(size: 14, weight: .bold, design: .monospaced))
+                        .foregroundStyle(NeonTheme.textPrimary)
                     Text("\(session.logEntries.count) events \u{2022} \(session.elapsedFormatted)")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(NeonTheme.textTertiary)
                 }
 
                 Spacer()
 
                 if let result = session.dualResult {
                     Text(result.outcome.longName)
-                        .font(.caption.weight(.bold))
-                        .foregroundStyle(outcomeColor(result.outcome))
+                        .font(.system(size: 10, weight: .black, design: .monospaced))
+                        .foregroundStyle(NeonTheme.outcomeColor(result.outcome))
                         .padding(.horizontal, 10)
                         .padding(.vertical, 6)
-                        .background(outcomeColor(result.outcome).opacity(0.12), in: .capsule)
+                        .background(NeonTheme.outcomeColor(result.outcome).opacity(0.1), in: .capsule)
                 }
             }
 
             if session.joeScreenshot != nil || session.ignitionScreenshot != nil {
-                HStack(spacing: 10) {
+                HStack(spacing: 8) {
                     timelineScreenshot(label: "JOE", data: session.joeScreenshot, outcome: session.dualResult?.joeOutcome)
                     timelineScreenshot(label: "IGN", data: session.ignitionScreenshot, outcome: session.dualResult?.ignitionOutcome)
                 }
             }
         }
-        .padding(16)
-        .background(Color(.secondarySystemGroupedBackground))
-        .clipShape(.rect(cornerRadius: 16))
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: 16)
+                .fill(NeonTheme.cardBackground)
+                .overlay(RoundedRectangle(cornerRadius: 16).stroke(NeonTheme.cardBorder, lineWidth: 0.5))
+        )
     }
 
     private func timelineScreenshot(label: String, data: Data?, outcome: DualLoginOutcome?) -> some View {
         Group {
             if let data, let uiImage = UIImage(data: data) {
-                Color(.tertiarySystemFill)
-                    .frame(height: 100)
+                Color(white: 0.08)
+                    .frame(height: 90)
                     .overlay {
                         Image(uiImage: uiImage)
                             .resizable()
@@ -104,12 +122,12 @@ struct FullTimelineView: View {
                     .overlay(alignment: .bottomLeading) {
                         HStack(spacing: 4) {
                             if let outcome {
-                                Image(systemName: outcome.iconName)
-                                    .font(.system(size: 7))
-                                    .foregroundStyle(outcomeColor(outcome))
+                                Circle()
+                                    .fill(NeonTheme.outcomeColor(outcome))
+                                    .frame(width: 4, height: 4)
                             }
                             Text(label)
-                                .font(.system(size: 9, weight: .bold, design: .monospaced))
+                                .font(.system(size: 8, weight: .black, design: .monospaced))
                                 .foregroundStyle(.white)
                         }
                         .padding(.horizontal, 7)
@@ -118,35 +136,38 @@ struct FullTimelineView: View {
                         .padding(6)
                     }
             } else {
-                RoundedRectangle(cornerRadius: 10)
-                    .fill(Color(.tertiarySystemFill))
-                    .frame(height: 100)
+                Color(white: 0.06)
+                    .frame(height: 90)
                     .overlay {
                         Text(label)
-                            .font(.caption2.weight(.bold))
-                            .foregroundStyle(.quaternary)
+                            .font(.system(size: 9, weight: .black, design: .monospaced))
+                            .foregroundStyle(NeonTheme.textDim)
                     }
+                    .clipShape(.rect(cornerRadius: 10))
             }
         }
         .frame(maxWidth: .infinity)
     }
 
+    // MARK: - Timeline Nodes
+
     private func timelineNode(entry: SessionLogLine, index: Int, isLast: Bool) -> some View {
         HStack(alignment: .top, spacing: 12) {
             VStack(spacing: 0) {
-                Circle()
-                    .fill(categoryColor(entry.category))
-                    .frame(width: 12, height: 12)
-                    .overlay {
-                        Circle()
-                            .fill(.white)
-                            .frame(width: 4, height: 4)
-                    }
+                ZStack {
+                    Circle()
+                        .fill(NeonTheme.logCategoryColor(entry.category))
+                        .frame(width: 12, height: 12)
+                        .neonGlow(NeonTheme.logCategoryColor(entry.category), radius: 3)
+                    Circle()
+                        .fill(NeonTheme.trueBlack)
+                        .frame(width: 4, height: 4)
+                }
 
                 if !isLast {
                     Rectangle()
-                        .fill(categoryColor(entry.category).opacity(0.25))
-                        .frame(width: 2)
+                        .fill(NeonTheme.logCategoryColor(entry.category).opacity(0.15))
+                        .frame(width: 1.5)
                         .frame(minHeight: 36)
                 }
             }
@@ -155,27 +176,27 @@ struct FullTimelineView: View {
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 8) {
                     Text(categoryLabel(entry.category))
-                        .font(.system(size: 9, weight: .bold, design: .monospaced))
-                        .foregroundStyle(categoryColor(entry.category))
+                        .font(.system(size: 8, weight: .black, design: .monospaced))
+                        .foregroundStyle(NeonTheme.logCategoryColor(entry.category))
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
-                        .background(categoryColor(entry.category).opacity(0.12), in: .capsule)
+                        .background(NeonTheme.logCategoryColor(entry.category).opacity(0.1), in: .capsule)
 
                     Text(timeString(entry.timestamp))
-                        .font(.system(size: 9, weight: .medium, design: .monospaced))
-                        .foregroundStyle(.tertiary)
+                        .font(.system(size: 8, weight: .medium, design: .monospaced))
+                        .foregroundStyle(NeonTheme.textDim)
 
                     if index > 0 {
                         let delta = entry.timestamp.timeIntervalSince(session.logEntries[index - 1].timestamp)
                         Text("+\(String(format: "%.1f", delta))s")
-                            .font(.system(size: 9, weight: .semibold, design: .monospaced))
-                            .foregroundStyle(.secondary)
+                            .font(.system(size: 8, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(NeonTheme.textTertiary)
                     }
                 }
 
                 Text(entry.message)
-                    .font(.system(size: 12, design: .monospaced))
-                    .foregroundStyle(.primary)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(NeonTheme.textPrimary)
                     .fixedSize(horizontal: false, vertical: true)
 
                 if entry.category == .result, let result = session.dualResult {
@@ -193,16 +214,18 @@ struct FullTimelineView: View {
     private func resultBadge(_ label: String, outcome: DualLoginOutcome) -> some View {
         HStack(spacing: 4) {
             Image(systemName: outcome.iconName)
-                .font(.system(size: 8))
-                .foregroundStyle(outcomeColor(outcome))
+                .font(.system(size: 7))
+                .foregroundStyle(NeonTheme.outcomeColor(outcome))
             Text("\(label): \(outcome.shortName)")
-                .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                .foregroundStyle(.secondary)
+                .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                .foregroundStyle(NeonTheme.textSecondary)
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 4)
-        .background(outcomeColor(outcome).opacity(0.08), in: .capsule)
+        .background(NeonTheme.outcomeColor(outcome).opacity(0.06), in: .capsule)
     }
+
+    // MARK: - Helpers
 
     private func timeString(_ date: Date) -> String {
         let f = DateFormatter()
@@ -217,27 +240,6 @@ struct FullTimelineView: View {
         case .network: "NET"
         case .error: "ERROR"
         case .result: "RESULT"
-        }
-    }
-
-    private func categoryColor(_ cat: SessionLogLine.Category) -> Color {
-        switch cat {
-        case .phase: .purple
-        case .action: .cyan
-        case .network: .blue
-        case .error: .red
-        case .result: .green
-        }
-    }
-
-    private func outcomeColor(_ outcome: DualLoginOutcome) -> Color {
-        switch outcome {
-        case .success: .green
-        case .noAccount: .indigo
-        case .permDisabled: .red
-        case .tempDisabled: .orange
-        case .unsure: .purple
-        case .error: .yellow
         }
     }
 }

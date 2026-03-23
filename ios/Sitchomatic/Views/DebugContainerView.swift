@@ -15,18 +15,21 @@ struct DebugContainerView: View {
 
     var body: some View {
         ScrollView {
-            VStack(spacing: 16) {
-                summarySection
+            VStack(spacing: 14) {
+                diagnosticsCard
                 categoryFilterSection
                 levelFilterSection
-                logListSection
+                logStreamSection
             }
             .padding(.horizontal, 16)
-            .padding(.top, 12)
+            .padding(.top, 8)
             .padding(.bottom, 24)
         }
-        .background(Color(.systemGroupedBackground))
+        .background(NeonTheme.trueBlack)
         .navigationTitle("Debug Console")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbarBackground(NeonTheme.trueBlack, for: .navigationBar)
+        .toolbarColorScheme(.dark, for: .navigationBar)
         .searchable(text: $searchText, prompt: "Search logs")
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
@@ -64,172 +67,233 @@ struct DebugContainerView: View {
                     }
                 } label: {
                     Image(systemName: "ellipsis.circle")
+                        .foregroundStyle(NeonTheme.textSecondary)
                 }
             }
         }
     }
 
-    private var summarySection: some View {
+    // MARK: - Diagnostics Card
+
+    private var diagnosticsCard: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Text("Diagnostics")
-                    .font(.headline)
+                HStack(spacing: 6) {
+                    Image(systemName: "stethoscope")
+                        .font(.system(size: 12))
+                        .foregroundStyle(NeonTheme.neonCyan)
+                    Text("DIAGNOSTICS")
+                        .font(.system(size: 11, weight: .black, design: .monospaced))
+                        .foregroundStyle(NeonTheme.textSecondary)
+                }
                 Spacer()
                 Text("\(filteredEntries.count) lines")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
+                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(NeonTheme.textTertiary)
             }
 
-            VStack(spacing: 8) {
-                summaryRow(label: "Engine", value: engine.state.displayName, detail: engine.healthScore.formatted(.percent.precision(.fractionLength(0))), tint: healthColor)
-                summaryRow(label: "Memory", value: String(format: "%.0f MB", crashProtection.currentMemoryUsageMB), detail: crashProtection.memoryPressureLevel.rawValue.capitalized, tint: memoryColor)
-                summaryRow(label: "Pool", value: "\(pool.activeCount) active", detail: pool.diagnosticSummary, tint: .cyan)
-                summaryRow(label: "Recovery", value: recovery.hasResumableCheckpoint() ? "Checkpoint" : "Clear", detail: recovery.diagnosticSummary, tint: recovery.hasResumableCheckpoint() ? .orange : .green)
-                summaryRow(label: "Background", value: backgroundLabel, detail: backgroundService.diagnosticSummary, tint: backgroundService.isBackgroundTimeLow ? .orange : .blue)
-                summaryRow(label: "Errors", value: "\(logger.recentErrors.count)", detail: orchestrator.networkStatusSummary, tint: logger.recentErrors.isEmpty ? .green : .red)
-            }
-        }
-        .padding(16)
-        .background(.regularMaterial, in: .rect(cornerRadius: 20))
-    }
-
-    private var categoryFilterSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Category")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
-
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    filterChip(title: "All", isSelected: selectedCategory == nil) {
-                        selectedCategory = nil
-                    }
-
-                    ForEach(DebugLogger.LogCategory.allCases, id: \.rawValue) { category in
-                        filterChip(title: category.title, isSelected: selectedCategory == category) {
-                            selectedCategory = category
-                        }
-                    }
-                }
-                .contentMargins(.horizontal, 0)
+            VStack(spacing: 6) {
+                diagRow(label: "Engine", value: engine.state.displayName, detail: engine.healthScore.formatted(.percent.precision(.fractionLength(0))), color: NeonTheme.healthColor(engine.healthScore))
+                diagRow(label: "Memory", value: String(format: "%.0f MB", crashProtection.currentMemoryUsageMB), detail: crashProtection.memoryPressureLevel.rawValue.capitalized, color: NeonTheme.memoryColor(crashProtection.memoryPressureLevel))
+                diagRow(label: "Pool", value: "\(pool.activeCount) active", detail: pool.diagnosticSummary, color: NeonTheme.neonCyan)
+                diagRow(label: "Recovery", value: recovery.hasResumableCheckpoint() ? "Checkpoint" : "Clear", detail: recovery.diagnosticSummary, color: recovery.hasResumableCheckpoint() ? NeonTheme.neonOrange : NeonTheme.neonGreen)
+                diagRow(label: "Background", value: backgroundLabel, detail: backgroundService.diagnosticSummary, color: backgroundService.isBackgroundTimeLow ? NeonTheme.neonOrange : NeonTheme.neonIndigo)
+                diagRow(label: "Errors", value: "\(logger.recentErrors.count)", detail: orchestrator.networkStatusSummary, color: logger.recentErrors.isEmpty ? NeonTheme.neonGreen : NeonTheme.neonRed)
             }
         }
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: 16)
+                .fill(NeonTheme.cardBackground)
+                .overlay(RoundedRectangle(cornerRadius: 16).stroke(NeonTheme.cardBorder, lineWidth: 0.5))
+        )
     }
 
-    private var levelFilterSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Minimum Severity")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
-
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    ForEach(DebugLogger.LogLevel.allCases, id: \.rawValue) { level in
-                        filterChip(title: level.title, isSelected: minimumLevel == level) {
-                            minimumLevel = level
-                        }
-                    }
-                }
-                .contentMargins(.horizontal, 0)
-            }
-        }
-    }
-
-    private var logListSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text("Live Log Stream")
-                    .font(.headline)
-                Spacer()
-                Text(searchText.isEmpty ? "Realtime" : "Filtered")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-            }
-
-            if filteredEntries.isEmpty {
-                ContentUnavailableView(
-                    searchText.isEmpty ? "No Matching Logs" : "No Search Results",
-                    systemImage: searchText.isEmpty ? "doc.text.magnifyingglass" : "magnifyingglass",
-                    description: Text(searchText.isEmpty ? "Adjust severity or category filters to inspect other diagnostic streams." : "Try a different search term or reduce the minimum severity filter.")
-                )
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 20)
-                .background(.regularMaterial, in: .rect(cornerRadius: 20))
-            } else {
-                LazyVStack(spacing: 8) {
-                    ForEach(filteredEntries.suffix(300).reversed()) { entry in
-                        logEntryCard(entry)
-                    }
-                }
-            }
-        }
-    }
-
-    private func filterChip(title: String, isSelected: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Text(title)
-                .font(.caption.weight(.semibold))
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .background(isSelected ? .cyan.opacity(0.16) : .secondary.opacity(0.08), in: .capsule)
-                .overlay {
-                    Capsule()
-                        .stroke(isSelected ? .cyan : .secondary.opacity(0.24), lineWidth: 1)
-                }
-        }
-        .buttonStyle(.plain)
-        .foregroundStyle(isSelected ? .cyan : .secondary)
-    }
-
-    private func summaryRow(label: String, value: String, detail: String, tint: Color) -> some View {
-        HStack(alignment: .top, spacing: 10) {
+    private func diagRow(label: String, value: String, detail: String, color: Color) -> some View {
+        HStack(alignment: .top, spacing: 8) {
             Text(label)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
-                .frame(width: 84, alignment: .leading)
+                .font(.system(size: 10, weight: .bold, design: .monospaced))
+                .foregroundStyle(NeonTheme.textTertiary)
+                .frame(width: 80, alignment: .leading)
 
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: 1) {
                 Text(value)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.primary)
+                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(NeonTheme.textPrimary)
                 Text(detail)
-                    .font(.caption2)
-                    .foregroundStyle(tint)
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundStyle(color)
                     .lineLimit(2)
             }
 
             Spacer()
         }
+        .padding(.vertical, 3)
     }
 
-    private func logEntryCard(_ entry: DebugLogger.LogEntry) -> some View {
+    // MARK: - Category Filter
+
+    private var categoryFilterSection: some View {
         VStack(alignment: .leading, spacing: 8) {
+            Text("CATEGORY")
+                .font(.system(size: 9, weight: .black, design: .monospaced))
+                .foregroundStyle(NeonTheme.textTertiary)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    neonChip(title: "All", isSelected: selectedCategory == nil) {
+                        selectedCategory = nil
+                    }
+                    ForEach(DebugLogger.LogCategory.allCases, id: \.rawValue) { category in
+                        neonChip(title: category.title, isSelected: selectedCategory == category) {
+                            selectedCategory = category
+                        }
+                    }
+                }
+            }
+            .contentMargins(.horizontal, 0)
+        }
+    }
+
+    // MARK: - Level Filter
+
+    private var levelFilterSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("SEVERITY")
+                .font(.system(size: 9, weight: .black, design: .monospaced))
+                .foregroundStyle(NeonTheme.textTertiary)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(DebugLogger.LogLevel.allCases, id: \.rawValue) { level in
+                        neonChip(title: level.title, isSelected: minimumLevel == level) {
+                            minimumLevel = level
+                        }
+                    }
+                }
+            }
+            .contentMargins(.horizontal, 0)
+        }
+    }
+
+    // MARK: - Log Stream
+
+    private var logStreamSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                HStack(spacing: 6) {
+                    Image(systemName: "terminal.fill")
+                        .font(.system(size: 11))
+                        .foregroundStyle(NeonTheme.neonGreen)
+                    Text("LOG STREAM")
+                        .font(.system(size: 11, weight: .black, design: .monospaced))
+                        .foregroundStyle(NeonTheme.textSecondary)
+                }
+                Spacer()
+                HStack(spacing: 4) {
+                    Circle()
+                        .fill(searchText.isEmpty ? NeonTheme.neonGreen : NeonTheme.neonCyan)
+                        .frame(width: 5, height: 5)
+                    Text(searchText.isEmpty ? "Realtime" : "Filtered")
+                        .font(.system(size: 9, weight: .bold, design: .monospaced))
+                        .foregroundStyle(searchText.isEmpty ? NeonTheme.neonGreen : NeonTheme.neonCyan)
+                }
+            }
+
+            if filteredEntries.isEmpty {
+                VStack(spacing: 12) {
+                    Image(systemName: searchText.isEmpty ? "doc.text.magnifyingglass" : "magnifyingglass")
+                        .font(.system(size: 28))
+                        .foregroundStyle(NeonTheme.textTertiary)
+                    Text(searchText.isEmpty ? "No Matching Logs" : "No Search Results")
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundStyle(NeonTheme.textSecondary)
+                    Text(searchText.isEmpty ? "Adjust severity or category filters." : "Try a different search term.")
+                        .font(.system(size: 11))
+                        .foregroundStyle(NeonTheme.textTertiary)
+                        .multilineTextAlignment(.center)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 32)
+                .background(
+                    RoundedRectangle(cornerRadius: 16)
+                        .fill(NeonTheme.cardBackground)
+                        .overlay(RoundedRectangle(cornerRadius: 16).stroke(NeonTheme.cardBorder, lineWidth: 0.5))
+                )
+            } else {
+                LazyVStack(spacing: 6) {
+                    ForEach(filteredEntries.suffix(300).reversed()) { entry in
+                        logEntryRow(entry)
+                    }
+                }
+            }
+        }
+    }
+
+    private func logEntryRow(_ entry: DebugLogger.LogEntry) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .firstTextBaseline) {
                 Text(entry.level.title)
-                    .font(.caption2.weight(.bold))
-                    .foregroundStyle(logColor(entry.level))
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(logColor(entry.level).opacity(0.12), in: .capsule)
+                    .font(.system(size: 8, weight: .black, design: .monospaced))
+                    .foregroundStyle(neonLogColor(entry.level))
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 3)
+                    .background(neonLogColor(entry.level).opacity(0.1), in: .capsule)
 
                 Text(entry.category.title)
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(.secondary)
+                    .font(.system(size: 8, weight: .bold, design: .monospaced))
+                    .foregroundStyle(NeonTheme.textTertiary)
 
                 Spacer()
 
                 Text(entry.timestamp.formatted(date: .omitted, time: .standard))
-                    .font(.caption2.monospacedDigit())
-                    .foregroundStyle(.tertiary)
+                    .font(.system(size: 8, weight: .medium, design: .monospaced))
+                    .foregroundStyle(NeonTheme.textDim)
             }
 
             Text(entry.message)
-                .font(.footnote.monospaced())
-                .foregroundStyle(.primary)
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(NeonTheme.textPrimary)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(12)
-        .background(.regularMaterial, in: .rect(cornerRadius: 16))
+        .padding(10)
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(NeonTheme.cardBackground)
+                .overlay(RoundedRectangle(cornerRadius: 12).stroke(NeonTheme.cardBorder, lineWidth: 0.5))
+        )
+    }
+
+    // MARK: - Helpers
+
+    private func neonChip(title: String, isSelected: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 10, weight: .semibold))
+                .padding(.horizontal, 10)
+                .padding(.vertical, 7)
+                .background(
+                    Capsule()
+                        .fill(isSelected ? NeonTheme.neonGreen.opacity(0.12) : Color.white.opacity(0.04))
+                )
+                .overlay(
+                    Capsule()
+                        .stroke(isSelected ? NeonTheme.neonGreen.opacity(0.4) : Color.white.opacity(0.06), lineWidth: 0.5)
+                )
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(isSelected ? NeonTheme.neonGreen : NeonTheme.textSecondary)
+    }
+
+    private func neonLogColor(_ level: DebugLogger.LogLevel) -> Color {
+        switch level {
+        case .trace: NeonTheme.textDim
+        case .debug: NeonTheme.textTertiary
+        case .info: NeonTheme.neonCyan
+        case .warning: NeonTheme.neonOrange
+        case .error: NeonTheme.neonRed
+        case .critical: NeonTheme.neonMagenta
+        }
     }
 
     private var filteredEntries: [DebugLogger.LogEntry] {
@@ -250,21 +314,6 @@ struct DebugContainerView: View {
             }
     }
 
-    private var healthColor: Color {
-        if engine.healthScore > 0.7 { return .green }
-        if engine.healthScore > 0.4 { return .orange }
-        return .red
-    }
-
-    private var memoryColor: Color {
-        switch crashProtection.memoryPressureLevel {
-        case .safe: .green
-        case .elevated: .yellow
-        case .critical: .orange
-        case .emergency: .red
-        }
-    }
-
     private var backgroundLabel: String {
         if backgroundService.remainingBackgroundTime > 900 {
             return "Foreground"
@@ -273,16 +322,5 @@ struct DebugContainerView: View {
             return "Idle"
         }
         return "\(Int(backgroundService.remainingBackgroundTime))s"
-    }
-
-    private func logColor(_ level: DebugLogger.LogLevel) -> Color {
-        switch level {
-        case .trace: .secondary.opacity(0.55)
-        case .debug: .secondary
-        case .info: .primary
-        case .warning: .orange
-        case .error: .red
-        case .critical: .red
-        }
     }
 }
