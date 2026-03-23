@@ -3,6 +3,7 @@ import UIKit
 
 struct SessionProofSheet: View {
     let session: ConcurrentSession
+    @State private var showFullTimeline: Bool = false
 
     var body: some View {
         NavigationStack {
@@ -17,7 +18,7 @@ struct SessionProofSheet: View {
                         errorCard(error)
                     }
                     actionBar
-                    logTimeline
+                    enhancedTimeline
                 }
                 .padding()
             }
@@ -283,7 +284,7 @@ struct SessionProofSheet: View {
         }
     }
 
-    private var logTimeline: some View {
+    private var enhancedTimeline: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
                 Image(systemName: "clock.arrow.circlepath")
@@ -291,6 +292,18 @@ struct SessionProofSheet: View {
                 Text("TIMELINE (\(session.logEntries.count))")
                     .font(.system(size: 11, weight: .black, design: .monospaced))
                     .foregroundStyle(.secondary)
+                Spacer()
+                if !session.logEntries.isEmpty {
+                    Button {
+                        showFullTimeline = true
+                    } label: {
+                        Label("Full Timeline", systemImage: "arrow.up.left.and.arrow.down.right")
+                            .font(.caption2.weight(.semibold))
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.mini)
+                    .tint(.cyan)
+                }
             }
 
             if session.logEntries.isEmpty {
@@ -299,29 +312,71 @@ struct SessionProofSheet: View {
                     .foregroundStyle(.tertiary)
                     .padding()
             } else {
-                VStack(alignment: .leading, spacing: 1) {
-                    ForEach(session.logEntries) { entry in
-                        HStack(alignment: .top, spacing: 8) {
-                            Circle()
-                                .fill(logCategoryColor(entry.category))
-                                .frame(width: 5, height: 5)
-                                .padding(.top, 5)
-
-                            VStack(alignment: .leading, spacing: 1) {
-                                Text(entry.formatted)
-                                    .font(.system(size: 10, design: .monospaced))
-                                    .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(Array(session.logEntries.prefix(20).enumerated()), id: \.element.id) { index, entry in
+                        HStack(alignment: .top, spacing: 10) {
+                            VStack(spacing: 0) {
+                                Circle()
+                                    .fill(logCategoryColor(entry.category))
+                                    .frame(width: 8, height: 8)
+                                if index < min(session.logEntries.count, 20) - 1 {
+                                    Rectangle()
+                                        .fill(logCategoryColor(entry.category).opacity(0.2))
+                                        .frame(width: 1.5)
+                                        .frame(minHeight: 20)
+                                }
                             }
+                            .frame(width: 8)
+
+                            VStack(alignment: .leading, spacing: 2) {
+                                HStack(spacing: 6) {
+                                    Text(entry.category.rawValue.uppercased())
+                                        .font(.system(size: 8, weight: .bold, design: .monospaced))
+                                        .foregroundStyle(logCategoryColor(entry.category))
+                                    Text(timeOnly(entry.timestamp))
+                                        .font(.system(size: 8, weight: .medium, design: .monospaced))
+                                        .foregroundStyle(.tertiary)
+                                    if index > 0 {
+                                        let delta = entry.timestamp.timeIntervalSince(session.logEntries[index - 1].timestamp)
+                                        Text("+\(String(format: "%.1f", delta))s")
+                                            .font(.system(size: 8, weight: .semibold, design: .monospaced))
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
+                                Text(entry.message)
+                                    .font(.system(size: 10, design: .monospaced))
+                                    .foregroundStyle(.primary)
+                                    .lineLimit(2)
+                            }
+                            .padding(.bottom, 6)
                         }
-                        .padding(.vertical, 3)
-                        .padding(.horizontal, 12)
+                    }
+
+                    if session.logEntries.count > 20 {
+                        Button {
+                            showFullTimeline = true
+                        } label: {
+                            Text("\(session.logEntries.count - 20) more entries...")
+                                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                                .foregroundStyle(.cyan)
+                        }
+                        .padding(.top, 6)
                     }
                 }
-                .padding(.vertical, 8)
+                .padding(12)
                 .background(Color(.secondarySystemGroupedBackground))
                 .clipShape(.rect(cornerRadius: 12))
             }
         }
+        .fullScreenCover(isPresented: $showFullTimeline) {
+            FullTimelineView(session: session)
+        }
+    }
+
+    private func timeOnly(_ date: Date) -> String {
+        let f = DateFormatter()
+        f.dateFormat = "HH:mm:ss"
+        return f.string(from: date)
     }
 
     private var phaseColor: Color {

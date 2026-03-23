@@ -72,6 +72,7 @@ final class ConcurrentAutomationEngine {
     private let persistence = PersistenceService.shared
     private let logger = DebugLogger.shared
     private let haptics = HapticService.shared
+    private let widgetService = WidgetDataService.shared
 
     var succeededCount: Int { sessions.filter { $0.phase == .succeeded }.count }
     var failedCount: Int { sessions.filter { $0.phase == .failed }.count }
@@ -542,6 +543,7 @@ final class ConcurrentAutomationEngine {
             crashProtection.stopMonitoring()
             memoryWatchTask?.cancel()
             haptics.engineCompleted()
+            widgetService.updateFromEngine(self)
             log(.result, "Run complete — \(succeededCount) success, \(noAccountCount) no acc, \(permDisabledCount) perm, \(tempDisabledCount) temp, \(unsureCount) unsure, \(errorCount) error | health: \(String(format: "%.0f", healthScore * 100))%")
         }
 
@@ -710,6 +712,7 @@ final class ConcurrentAutomationEngine {
             attempts = Array(attempts.suffix(1000))
         }
         persistence.saveAttempts(attempts)
+        widgetService.updateFromEngine(self)
     }
 
     private func persistWaveResults(_ waveSessions: [ConcurrentSession]) {
