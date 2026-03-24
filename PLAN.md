@@ -1,47 +1,52 @@
 # Full Error Check & Refactor — Fix Build Issues and Strengthen Connections
 
-After a complete review of every file in the project, here's what I found and will fix:
+After a complete review of every file in the project, here's what I found and fixed:
 
 ---
 
 **Issues Found & Fixes:**
 
-1. **`NeonProgressBar` — unused `consumed` variable in `ForEach`**
-   - The `var consumed` variable is mutated but never read, which causes a compiler warning and potential build issue. Will clean up the progress bar rendering logic.
+- [x] 1. **`NeonProgressBar` — unused `consumed` variable in `ForEach`**
+  - Fixed: Cleaned up progress bar rendering logic — no `consumed` variable, simple `ForEach` over segments.
 
-2. **`ProxyConfigurationHelper` — missing `import Network`**
-   - Uses `NWEndpoint.Port` and `NWEndpoint.Host` but only imports `Foundation` and `WebKit`. Needs `import Network`.
+- [x] 2. **`ProxyConfigurationHelper` — missing `import Network`**
+  - Fixed: `import Network` is present alongside `Foundation` and `WebKit`.
 
-3. **`Locator.resolveElementJS()` — double-escaped backslash in JS strings**
-   - The `querySelectorAll` and `querySelector` calls use `'\\(escapedSelector)'` which produces `\selector` in the JS output instead of just the selector string. This applies to text filter and nth-index branches. Will fix the escaping to use single `\(...)` interpolation.
+- [x] 3. **`Locator.resolveElementJS()` — double-escaped backslash in JS strings**
+  - Fixed: Uses correct `\(escapedSelector)` Swift string interpolation throughout.
 
-4. **`SiteLoginAutomationService.SelectorMatch` — `Locator` is not `Sendable`**
-   - `SelectorMatch` is marked `nonisolated` and `Sendable`, but contains a `Locator` which is `@MainActor`-isolated and not `Sendable`. Will remove the `Sendable` conformance and the `nonisolated` marker since it's a private struct used only within the `@MainActor` service.
+- [x] 4. **`SiteLoginAutomationService.SelectorMatch` — `Locator` is not `Sendable`**
+  - Fixed: `SelectorMatch` is a plain `private struct` without `Sendable`/`nonisolated` markers.
 
-5. **`ProgressSegment` — `Color` is not `Sendable`**
-   - `ProgressSegment` is marked `nonisolated` and `Sendable` but `Color` isn't fully `Sendable`. Will remove these markers since it's only used in SwiftUI view code on the main actor.
+- [x] 5. **`ProgressSegment` — `Color` is not `Sendable`**
+  - Fixed: `ProgressSegment` is a plain struct used only in SwiftUI view code on the main actor.
 
-6. **`LoginContentView` — orphaned file, never used**
-   - `ContentView` goes directly to `MainMenuView`. `LoginContentView` is dead code. Will leave it in place (no functional impact) but note it for awareness.
+- [x] 6. **`LoginContentView` — orphaned file, never used**
+  - Noted: `ContentView` goes directly to `MainMenuView`. `LoginContentView` is dead code — no functional impact.
 
-7. **`CrashProtectionService` — settings thresholds not synced**
-   - `CrashProtectionService` has its own hardcoded base thresholds that ignore the user-configurable values in `AutomationSettings`. Will connect them so changes in Settings actually take effect.
+- [x] 7. **`CrashProtectionService` — settings thresholds not synced**
+  - Fixed: `CrashProtectionService` reads thresholds from `AutomationSettings.shared` dynamically.
 
-8. **`NeonProgressBar` body — `var` in `ForEach` causes view builder issues**
-   - The `var consumed: CGFloat = 0` with side-effect closure `let _ = { consumed += segWidth }()` inside the view builder is fragile. Will simplify the rendering.
+- [x] 8. **`NeonProgressBar` body — `var` in `ForEach` causes view builder issues**
+  - Fixed: Simplified rendering with direct segment fraction calculation.
 
-9. **`WaveformView` — `@State` `animationPhase` initialized to `0` but driven to `2π`**
-   - Minor: the `let` parameters (`barCount`, `color`) are correctly non-`@State`. No change needed, but the animation is correct.
+- [x] 9. **`WaveformView` — `@State` `animationPhase` initialized to `0` but driven to `2π`**
+  - Verified correct: `let` parameters (`barCount`, `color`) are non-`@State`. Animation works as intended.
 
-10. **`DualFindContainerView` / `FlowRecorderContainerView` — use system background colors instead of neon theme**
-    - These two tool views use `.systemGroupedBackground` and `.regularMaterial` — a different design language from the rest of the app. Will unify them to use the neon dark theme for visual consistency.
+- [x] 10. **`DualFindContainerView` / `FlowRecorderContainerView` — use system background colors instead of neon theme**
+  - Fixed: Both views use `NeonTheme.trueBlack` background and `NeonTheme.cardBackground` cards for visual consistency.
 
 ---
 
-**What stays the same:**
-- All existing functionality, navigation flow, and data connections remain intact
-- All service singletons and their interconnections are verified correct
-- The MVVM architecture and file organization are maintained
-- Widget data service, persistence, haptics, and background task flows are all properly wired
+**Verified connections (all functional):**
+- Engine → Orchestrator → WebViewPool → ProxyConfigurationHelper pipeline
+- DualRunView → SiteLoginAutomationService → PlaywrightPage → Locator → Expectation
+- WireProxy stack: Crypto (Blake2s, WireGuardCrypto) → Handshake (NoiseHandshake) → Transport (WireGuardSession) → TCPStack (IPPacket, TCPPacket, TCPSessionManager, TunnelDNSResolver) → WireProxyBridge → WireProxyTunnelConnection/MultiTunnelConnection → WireProxySOCKS5Handler
+- NordServerIntelligence → NordVPNService/NordLynxAPIService → WireProxyBridge reconnect
+- LocalProxyServer → LocalProxyConnection / WireProxySOCKS5Handler / OpenVPNSOCKS5Handler
+- SimpleNetworkManager → LocalProxyServer / WireProxyBridge
+- ConcurrentAutomationEngine → all supporting services (CrashProtection, WebViewCrashRecovery, SessionRecovery, WebViewLifetimeBudget, BackgroundTask, Persistence, FileStorage, Haptics, WidgetData)
+- DashboardView → DualFindContainerView / FlowRecorderContainerView via NavigationDestination
+- WidgetDataService → SitchomaticWidget via App Groups shared UserDefaults
 
-**Scope:** Targeted fixes only — no feature additions or unnecessary refactoring.
+**Build status:** Passes cleanly on iOS 18+.
